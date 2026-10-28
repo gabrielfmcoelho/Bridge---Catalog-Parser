@@ -5,6 +5,35 @@ Uma tag publicada nunca é movida: correções saem em uma versão nova.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
+Diagrama Mermaid dos relacionamentos entre CIs e componentes.
+
+### Adicionado
+
+- **Comando `catalog-diagram [ROOT]`** e `catalog_parser.generate_diagram(root, peers=None, docs_dir="docs", filename="catalog-dependencies.md")`:
+  geram `docs/catalog-dependencies.md` com um diagrama Mermaid (`flowchart LR`) do repositório atual — o CI e seus
+  componentes em um quadro, os componentes dos CIs vizinhos que ele consome ou serve, e os sistemas externos.
+  `A --> B` significa "A depende de B"; o rótulo da aresta é o protocolo/porta de quem fornece (`via X` marca acesso
+  indireto); a cor do nó é a criticidade e componentes `data` são cilindros.
+- **Pasta `docs/` ausente não falha:** emite o aviso `W301` (stderr, código de saída `0`) e não escreve nada; a pasta
+  não é criada. Catálogo ilegível ou com esquema inválido não pode ser desenhado: erros no stderr e código de saída `1`.
+- `catalog_parser.render_mermaid(catalog, peers)` devolve só o texto do diagrama.
+- Opções do `catalog-diagram`: `--peers PATH` (repetível, ou `$CATALOG_PEERS`) para rotular os componentes que outros
+  CIs fornecem; `--docs-dir`, `--filename` e `--stdout` (imprime em vez de gravar, sem exigir `docs/`).
+- A saída é determinística (sem data/hora): gerar de novo sem mudar o catálogo não produz diff.
+
+### Alterado
+
+- Internos: `catalog_parser.api` passa a expor `catalog_file`, `repo_root` e `load_peers`, compartilhados com o diagrama.
+  `check_repo` mantém o mesmo comportamento.
+
+### Instalação
+
+```bash
+uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.2.0"
+```
+
 ## [0.1.0] - 2026-10-28
 
 Primeira versão: parser e linter para `catalog/dependencies.yml`.
@@ -42,5 +71,6 @@ Primeira versão: parser e linter para `catalog/dependencies.yml`.
 uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0"
 ```
 
-[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/releases/tag/v0.1.0

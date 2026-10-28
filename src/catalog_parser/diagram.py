@@ -1,0 +1,174 @@
+"""Mermaid diagram of one repository: its CI, its components, and how they link to other CIs.
+
+Arrow direction is dependency direction: `A --> B` means A depends on B. Output is deterministic
+(no timestamps), so regenerating without catalog changes leaves no diff."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .api import catalog_file, load_peers, repo_root
+from .issues import WARNING, Issue
+from .lint import lint_file
+from .models import Category, Component, Dependency, DependencyCatalog
+
+DEFAULT_DOCS_DIR = "docs"
+DEFAULT_FILENAME = "catalog-dependencies.md"
+
+CLASS_DEFS = {
+    "high": "fill:#f8d7da,stroke:#c0392b,color:#000",
+    "medium": "fill:#fff3cd,stroke:#b7950b,color:#000",
+    "low": "fill:#d4edda,stroke:#1e8449,color:#000",
+}
+
+
+def _id(*parts: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", "_".join(parts)).strip("_")
+
+
+def _q(text: str) -> str:
+    return str(text).replace('"', "'")
+
+
+def _endpoint(protocol, port) -> str:
+    proto = protocol.value if protocol else ""
+    return f"{proto}:{port}" if port else proto
+
+
+def _shape(node_id: str, text: str, category: Category | None = None) -> str:
+    if category == Category.DATA:
+        return f'{node_id}[("{_q(text)}")]'
+    return f'{node_id}["{_q(text)}"]'
+
+
+def _component_text(c: Component) -> str:
+    ep = _endpoint(c.protocol, c.port)
+    return f"{c.name}<br/>{c.technology.value}" + (f" · {ep}" if ep else "")
+
+
+def render_mermaid(own: DependencyCatalog, peers: Iterable[DependencyCatalog] = ()) -> str:
+    """Flowchart source. `peers` only enrich the labels of components that other CIs provide."""
+    known = {p.ci: {c.name: c for c in p.components} for p in peers}
+    own_components = {c.name: c for c in own.components}
+    classes: dict[str, list[str]] = {}
+    out = ["flowchart LR"]
+
+    def component_node(ci: str, c: Component) -> str:
+        nid = _id(ci, c.name)
+        classes.setdefault(c.criticality.value, []).append(nid)
+        return "    " + _shape(nid, _component_text(c), c.category)
+
+    own_id = _id("ci", own.ci)
+    out.append(f'  subgraph {own_id}["{_q(own.ci)}"]')
+    out += [component_node(own.ci, c) for c in own.components]
+    out.append("  end")
+
+    provided: dict[str, list[str]] = {}   # other CI -> components of it that this CI links to
+    plain: dict[str, Dependency] = {}     # CIs without component: externals, consumers without a catalog
+    for dep in [*own.dependencies.upstream, *own.dependencies.downstream]:
+        if dep.component:
+            names = provided.setdefault(dep.ci, [])
+            if dep.component not in names:
+                names.append(dep.component)
+        else:
+            plain.setdefault(dep.ci, dep)
+
+    for ci, names in provided.items():
+        out.append(f'  subgraph {_id("ci", ci)}["{_q(ci)}"]')
+        for name in names:
+            c = known.get(ci, {}).get(name)
+            out.append(component_node(ci, c) if c else f'    {_id(ci, name)}["{_q(name)}"]')
+        out.append("  end")
+
+    for ci, dep in plain.items():
+        nid = _id("ext", ci)
+        text = ci
+        if dep.technology:
+            ep = _endpoint(dep.protocol, dep.port)
+            text += f"<br/>{dep.technology.value}" + (f" · {ep}" if ep else "")
+        out.append(f'  {nid}(["{_q(text)}"])')
+        if dep.criticality:
+            classes.setdefault(dep.criticality.value, []).append(nid)
+
+    def own_end(name: str | None) -> str:
+        return _id(own.ci, name) if name in own_components else own_id
+
+    def edge(src: str, dst: str, endpoint: str, via: str | None) -> str:
+        label = " · ".join(x for x in (endpoint, f"via {via}" if via else "") if x)
+        return f'  {src} -->|"{_q(label)}"| {dst}' if label else f"  {src} --> {dst}"
+
+    for dep in own.dependencies.upstream:  # this CI consumes
+        if dep.component:
+            c = known.get(dep.ci, {}).get(dep.component)
+            dst, ep = _id(dep.ci, dep.component), (_endpoint(c.protocol, c.port) if c else "")
+        else:
+            dst, ep = _id("ext", dep.ci), _endpoint(dep.protocol, dep.port)
+        out.append(edge(own_end(dep.local_component), dst, ep, dep.via))
+    for dep in own.dependencies.downstream:  # the other CI consumes this one
+        src = _id(dep.ci, dep.component) if dep.component else _id("ext", dep.ci)
+        c = own_components.get(dep.local_component)
+        out.append(edge(src, own_end(dep.local_component), _endpoint(c.protocol, c.port) if c else "", dep.via))
+
+    if classes:
+        out.append("")
+        for crit in ("high", "medium", "low"):
+            if crit in classes:
+                out.append(f"  classDef {crit} {CLASS_DEFS[crit]}")
+                out.append(f"  class {','.join(classes[crit])} {crit}")
+    return "\n".join(out)
+
+
+def render_markdown(own: DependencyCatalog, peers: Iterable[DependencyCatalog] = ()) -> str:
+    return f"""<!-- Generated by catalog-parser from catalog/dependencies.yml. Do not edit by hand. -->
+# Dependency map — {own.ci}
+
+{own.description}
+
+```mermaid
+{render_mermaid(own, peers)}
+```
+
+`A --> B` means *A depends on B*. The label is the provider's protocol and port; `via X` marks indirect access.
+Colour is the component's criticality (red high, yellow medium, green low). Cylinders are data components;
+rounded boxes outside the repository box are external systems or consumers without a catalog.
+"""
+
+
+@dataclass
+class DiagramResult:
+    path: Path | None = None            # file written, None when nothing was written
+    markdown: str | None = None         # rendered content, None when the catalog could not be loaded
+    issues: list[Issue] = field(default_factory=list)
+
+
+def generate_diagram(
+    root: str | Path = ".",
+    peers: Iterable[str | Path] | None = None,
+    docs_dir: str = DEFAULT_DOCS_DIR,
+    filename: str = DEFAULT_FILENAME,
+    write: bool = True,
+) -> DiagramResult:
+    """Render the diagram of the repository at `root` and write it to `<root>/<docs_dir>/<filename>`.
+
+    A missing docs folder is a W301 warning, never an error: nothing is written and the caller goes on.
+    An unreadable or schema-invalid catalog cannot be drawn: `markdown` stays None and the lint errors
+    come back in `issues`.
+    """
+    file = catalog_file(root)
+    own = lint_file(file)
+    if own.catalog is None:
+        return DiagramResult(issues=own.issues)
+    markdown = render_markdown(own.catalog, [p.catalog for p in load_peers(peers, file) if p.catalog])
+    result = DiagramResult(markdown=markdown)
+    if not write:
+        return result
+    docs = repo_root(root) / docs_dir
+    if not docs.is_dir():
+        result.issues.append(Issue("W301", WARNING, f"docs folder '{docs}' not found; diagram not written", docs))
+        return result
+    result.path = docs / filename
+    result.path.write_text(markdown, encoding="utf-8")
+    return result
