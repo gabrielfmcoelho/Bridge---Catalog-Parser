@@ -1,0 +1,14 @@
+# Configuration shared by the example repositories (found by walking up from each one).
+# Every key is optional; see the README for the full reference.
+
+[vocabulary]
+# Closed lists: any other value is an E002 error. Remove a list to accept any value.
+technologies = ["rest-api", "celery", "postgresql", "react"]
+protocols = ["http", "https", "tcp", "grpc"]
+git_providers = ["github", "gitlab"]
+
+[rules]
+ignore = []
+
+[diagram]
+direction = "LR"

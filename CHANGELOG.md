@@ -1,9 +1,63 @@
 # Changelog
 
-Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem [SemVer](https://semver.org/lang/pt-BR/).
-Uma tag publicada nunca é movida: correções saem em uma versão nova.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
+A published tag is never moved: fixes ship in a new version. Entries up to 0.3.0 are in Portuguese.
 
 ## [Unreleased]
+
+To be released as **0.4.0**. The project becomes generic and open-source: every value that was
+specific to one organisation now comes from configuration, and the code is reorganised into small
+classes that you extend without editing the library.
+
+### Added
+
+- **Configuration** in `.catalog-parser.toml`, in `[tool.catalog-parser]` of `pyproject.toml`, or in
+  the file named by `$CATALOG_PARSER_CONFIG`. It is searched from the repository upwards to the
+  first folder with `.git`. Sections:
+  `[vocabulary]` (technologies, protocols, git providers, categories, data categories, criticalities),
+  `[layout]` (catalog folder, peers env var, skipped folders), `[rules]` (`select`/`ignore` by code
+  or prefix) and `[diagram]` (paths, direction, title, legend, colours per criticality).
+  An unknown key is a configuration error (exit code `2`).
+- CLI: `--config FILE` on both commands; `catalog-lint --select/--ignore CODES` and `--list-rules`.
+- Extension points: `FileRule`/`CrossRule` (one class per code), `CatalogKind` + `KindRegistry`,
+  `Reporter` + `REPORTERS`, and the services `Linter`, `RepositoryChecker`, `DiagramGenerator`,
+  `MermaidRenderer` and `CatalogDiscoverer`, all exported from `catalog_parser`.
+- `examples/` with two repositories that link to each other, a shared config, and the generated diagram.
+- `py.typed`, package metadata (URLs, classifiers), and a GitHub Actions test workflow.
+
+### Changed
+
+- **`technology`, `protocol` and `git.type` accept any value by default.** In 0.3.0 they were closed
+  lists (`git.type` only `gitlab`). To keep the old validation, add the lists to your config:
+
+  ```toml
+  [vocabulary]
+  technologies = ["trino", "minio", "hive-metastore", "opa", "oracle", "postgresql", "mysql", "redis",
+                  "airflow", "celery", "dbt", "iceberg", "gitlab", "keycloak", "ssrs", "rest-api",
+                  "openai-api", "otel-collector"]
+  protocols = ["http", "https", "tcp", "grpc", "ssh"]
+  git_providers = ["gitlab"]
+  ```
+- An E002 for a value outside the vocabulary now reads `technology 'x' is not one of: ...`.
+- `generate_diagram(docs_dir=, subdir=, filename=)` default to `None`, which means "from the settings".
+  The defaults are unchanged (`docs/catalog/dependencies.md`).
+- Default `skip_dirs` no longer has `dbt_packages`; it gains `venv`, `.tox`, `dist` and `build`.
+  Skipped names are now matched only **below** the searched folder, so a checkout under a folder
+  called `build` or `target` is no longer hidden.
+- With a nested `catalog_dir`, the repository root of an explicit catalog file comes from the depth
+  of `catalog_dir` (it was always two levels up).
+- Docs and docstrings are in English.
+
+### Removed
+
+- The modules `catalog_parser.api` and `catalog_parser.lint`, the enums `Category`, `Criticality`,
+  `Protocol` and `Technology`, and the dicts `kinds.FILE_LINTERS`/`CROSS_LINTERS`. The public
+  functions (`lint_file`, `lint_cross`, `check_repo`, `generate_diagram`, `render_mermaid`,
+  `parse_dependencies`, `testing.assert_catalog_valid`) keep their behaviour and are imported from
+  `catalog_parser`.
+
+With the default settings, the lint findings and the diagrams of existing catalogs are byte-for-byte
+the same as in 0.3.0.
 
 ## [0.3.0] - 2026-10-28
 

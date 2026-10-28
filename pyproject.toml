@@ -1,15 +1,34 @@
 [project]
 name = "catalog-parser"
-version = "0.3.0"
-description = "Parser and linter for the catalog/*.yml files of data lakehouse repositories"
+version = "0.4.0"
+description = "Parser, linter and Mermaid diagram generator for service dependency catalogs kept in each repository"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "Alvaro Araujo" }]
 requires-python = ">=3.11"
+keywords = ["catalog", "dependencies", "lint", "service-catalog", "mermaid", "architecture", "yaml"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Documentation",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.6",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser"
+Repository = "https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser"
+Issues = "https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/issues"
+Changelog = "https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/blob/main/CHANGELOG.md"
 
 [project.scripts]
 catalog-lint = "catalog_parser.cli:main"

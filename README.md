@@ -1,129 +1,264 @@
 # catalog-parser
 
-Parser e linter dos arquivos `catalog/*.yml` dos repositórios de um data lakehouse.
-Hoje cobre `catalog/dependencies.yml` (catálogo de dependências entre CIs e componentes).
+A linter and diagram generator for **dependency catalogs**: one small YAML file per repository
+(`catalog/dependencies.yml`) that says what the system is made of and which other systems it
+talks to, in each direction.
 
-## Uso
+- **Lint** each catalog (schema, references, duplicates) with errors that point at the right line.
+- **Cross-check** catalogs across repositories: if A says it consumes B, B must list A as a consumer.
+- **Draw** a Mermaid map of each repository into `docs/`. GitHub, GitLab and VS Code render it.
+- **Use it in tests**: one assertion in a repository's own test suite keeps its catalog honest.
 
-```bash
-uv sync                                   # instala a lib e as dependências de dev
-uv run catalog-lint ../repo-a ../repo-b                              # varre catalog/dependencies.yml
-uv run catalog-lint caminho/catalog/dependencies.yml                  # um arquivo
-uv run catalog-lint --format json .       # saída para ferramentas
-uv run pytest                             # testes
-uv run catalog-diagram ../repo-a --peers ..     # grava ../repo-a/docs/catalog/dependencies.md
-```
+Every project-specific choice is configurable, and new rules, catalog kinds and output formats plug in
+without editing the library. The configurable choices are the allowed technologies, protocols and
+criticalities, the folder layout, which rules run, and how the diagram looks.
 
-Códigos de saída: `0` sem erros · `1` erros (ou avisos com `--strict`) · `2` uso incorreto.
-`--no-cross` desliga as regras entre arquivos (`X###`).
-
-Como biblioteca:
-
-```python
-from catalog_parser import lint_file, lint_cross
-
-parsed = [lint_file(p) for p in paths]           # Parsed: .catalog (modelo pydantic), .issues
-issues = [i for p in parsed for i in p.issues] + lint_cross(parsed)
-```
-
-## Diagrama Mermaid
-
-`catalog-diagram [ROOT]` gera `docs/catalog/dependencies.md` no repositório, com o mapa de relacionamentos entre o CI,
-seus componentes, os componentes dos CIs vizinhos e os sistemas externos. `A --> B` = "A depende de B"; o rótulo é o
-protocolo/porta de quem fornece; a cor é a criticidade; cilindro = componente de dados.
+## Install
 
 ```bash
-uv run catalog-diagram .                        # grava docs/catalog/dependencies.md
-uv run catalog-diagram . --peers ..             # rotula também os componentes dos vizinhos (repetível, ou $CATALOG_PEERS)
-uv run catalog-diagram . --stdout               # imprime em vez de gravar
+pip install "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0"
+# or, as a dev dependency with uv
+uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0"
 ```
 
-- **Sempre em `docs/catalog/`**, nunca solto em `docs/` (`--subdir` e `--filename` mudam o destino). A subpasta é criada se `docs/` existir.
-- **Sem pasta `docs/`:** só o aviso `W301` no stderr, código de saída `0`, nada é criado (nem `docs/`, nem `docs/catalog/`).
-- **Catálogo inválido:** não há o que desenhar; erros no stderr e código de saída `1`.
-- A saída não tem data/hora, então só muda quando o catálogo muda. Renderiza no GitHub/GitLab e no preview do VS Code.
-- Em Python: `generate_diagram(root, peers=None)` e `render_mermaid(catalog, peers)`.
+Requires Python 3.11+.
 
-## Regras
+## The catalog
 
-| Código | Severidade | O que verifica |
-|---|---|---|
-| E001 | erro | arquivo ilegível / YAML inválido / raiz não é um mapa |
-| E002 | erro | esquema: tipo, enum, campo desconhecido, obrigatório ausente |
-| E101 | erro | componente duplicado |
-| E102 | erro | `local_component` não declarado neste arquivo |
-| E103 | erro | características inline em entrada que tem `component` (elas vivem no componente) |
-| E104 | erro | externo em `upstream` sem `category`/`technology`/`criticality`/`description` |
-| E105 | erro | `downstream` sem `component` carregando características |
-| E106 | erro | entrada com `component` sem `local_component` |
-| E107 | erro | `downstream` sem `local_component` |
-| E108 | erro | CI dependendo de si mesmo |
-| E109 | erro | entrada duplicada na mesma lista |
-| E110 | erro | `git.path` não termina com o nome do `ci` |
-| E112 | erro | `via` aponta para o próprio CI |
-| W201 | aviso | componente com `port` sem `protocol` |
-| W202 | aviso | componente `data` com `protocol`/`port` |
-| X001 | erro | mesmo `ci` em dois arquivos |
-| X002 | erro | `component` não declarado no CI referenciado |
-| X003 | erro | vínculo sem o espelho do outro lado (`ci` + `component` + `local_component`); `blame` = o CI que precisa acrescentar a entrada |
-| W203 | aviso | CI referenciado com `component` cujo catálogo não foi carregado: vínculo não conferido |
+```yaml
+# <repo>/catalog/dependencies.yml
+ci: shop-api                         # this system (a "configuration item"), usually the repository name
+description: Orders and payments API
+owners:   [{ name: Jane Doe, email: jane@example.org, username: jdoe }]
+entity:   [{ name: Example Corp, slug: example-corp, type: company }]
+git:      { type: github, host: github.com, path: example-corp/shop-api }
 
-`X002`/`X003` só valem entre os catálogos carregados na mesma execução; uma referência com `component` a um CI
-cujo catálogo não foi carregado gera `W203` (o vínculo não foi conferido). Sistemas externos, que não têm
-`component`, não geram aviso.
+components:                          # the parts of THIS system; traits live here
+  - { name: api, category: application, technology: rest-api, protocol: https, port: 8443,
+      criticality: high, description: Public REST API }
 
-## Como dependência de um repositório
+dependencies:
+  upstream:                          # what this system consumes
+    - ci: payment-gateway            # external system (no catalog): traits inline
+      local_component: api
+      category: service
+      technology: rest-api
+      protocol: https
+      port: 443
+      criticality: high
+      description: Card payments
+  downstream:                        # who consumes this system
+    - { ci: shop-web, component: frontend, local_component: api }   # another catalogued system
+    - { ci: bi-dashboard, local_component: api }                    # consumer without a catalog
+```
 
-A lib é pensada para ser **dependência de dev** de cada repositório e rodar na suíte de testes dele.
+- `ci` + `component` identify the **other** end of a link; `local_component` is **this** system's end.
+- A link between two catalogued systems must be declared on both sides (the *mirror*): `shop-api`
+  lists `shop-web` downstream, and `shop-web` lists `shop-api` upstream.
+- External systems have no `component`, so they carry their traits inline.
+
+A complete two-repository example, with its generated diagram, is in [`examples/`](examples/).
+
+## Command line
+
+```bash
+catalog-lint                                   # every catalog under the current folder
+catalog-lint ../repo-a ../repo-b               # several repositories: mirrors are checked between them
+catalog-lint path/to/catalog/dependencies.yml  # one file
+catalog-lint --format json .                   # machine-readable output
+catalog-lint --ignore E110 --select E,X .      # choose rules (codes or prefixes)
+catalog-lint --list-rules                      # every code with its meaning
+catalog-diagram .                              # writes docs/catalog/dependencies.md
+catalog-diagram . --peers ..                   # also label the components other repositories provide
+catalog-diagram . --stdout                     # print instead of writing
+```
+
+`catalog-lint` exits with `0` when there are no errors, `1` on errors (or on warnings with
+`--strict`), and `2` on a usage or configuration error. `--no-cross` turns off the cross-file rules
+(`X###`).
+
+The behaviour of `catalog-diagram`:
+- The file is written to `<docs_dir>/<subdir>/<filename>`, which is `docs/catalog/dependencies.md`
+  by default. The subfolder is created when the docs folder exists.
+- **No docs folder:** you get warning `W301` on stderr and exit code `0`, and nothing is created.
+- **Invalid catalog:** there is nothing to draw, so the errors go to stderr and the exit code is `1`.
+- The output has no timestamps, so regenerating it without catalog changes produces no diff.
+- In the diagram, `A --> B` means *A depends on B*. The edge label is the provider's protocol and
+  port. The colour is the criticality, and cylinders are data components.
+
+## Configuration
+
+Settings are read from the first of these that applies:
+
+1. `--config FILE` (CLI) or `settings=` (Python);
+2. the file named by `$CATALOG_PARSER_CONFIG`;
+3. the nearest `.catalog-parser.toml`, or `pyproject.toml` with a `[tool.catalog-parser]` table,
+   searching from the repository (from the working directory for `catalog-lint`) upwards, up to and
+   including the first folder that contains `.git`;
+4. the built-in defaults below.
+
+Every key is optional. Unknown keys are errors.
 
 ```toml
-# pyproject.toml do repo (uv)
-[dependency-groups]
-dev = ["catalog-parser"]
+# .catalog-parser.toml  (in pyproject.toml, prefix each table with "tool.catalog-parser.")
 
-[tool.uv.sources]
-catalog-parser = { git = "https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser", tag = "v0.1.0" }
+[vocabulary]
+# Omit a list to accept any value; set it to make the list closed (other values -> E002).
+technologies  = ["postgresql", "redis", "rest-api"]   # default: any
+protocols     = ["http", "https", "tcp", "grpc"]      # default: any
+git_providers = ["github", "gitlab"]                  # default: any
+categories    = ["service", "data", "infrastructure", "application"]  # default shown
+data_categories = ["data"]              # stored data: no protocol/port (W202), drawn as cylinders
+criticalities = ["high", "medium", "low"]               # ordered, most critical first
+
+[layout]
+catalog_dir = "catalog"                 # relative to the repository root; may be nested (".meta/catalog")
+peers_env   = "CATALOG_PEERS"           # env var with os.pathsep-separated peers
+skip_dirs   = [".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", "dist", "build", "target"]
+
+[rules]
+select = []                             # codes or prefixes; empty = all
+ignore = ["E110"]                       # e.g. git.path need not end with the ci name
+
+[diagram]
+docs_dir  = "docs"
+subdir    = "catalog"
+filename  = "dependencies.md"
+direction = "LR"                        # LR, RL, TB, TD, BT
+title     = "Dependency map — {ci}"
+legend    = "..."                       # markdown under the diagram
+
+[diagram.styles]                        # criticality -> Mermaid classDef (no entry = no colour)
+high   = "fill:#f8d7da,stroke:#c0392b,color:#000"
+medium = "fill:#fff3cd,stroke:#b7950b,color:#000"
+low    = "fill:#d4edda,stroke:#1e8449,color:#000"
 ```
 
-Com `requirements-dev.txt`: `catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0`
+To share one configuration across many repositories, point `$CATALOG_PARSER_CONFIG` at it (for
+example in CI), or copy the file into each repository.
+
+## Rules
+
+| Code | Severity | What it checks |
+|---|---|---|
+| E001 | error | unreadable file, invalid YAML, or top level is not a mapping |
+| E002 | error | schema: type, allowed value (vocabulary), unknown field, missing required field |
+| E101 | error | duplicate component name |
+| E102 | error | `local_component` not declared in this file |
+| E103 | error | inline traits on an entry with `component` (traits live on the component) |
+| E104 | error | external `upstream` without `category`/`technology`/`criticality`/`description` |
+| E105 | error | `downstream` entry without `component` carrying traits |
+| E106 | error | entry with `component` but no `local_component` |
+| E107 | error | `downstream` entry without `local_component` |
+| E108 | error | CI depending on itself |
+| E109 | error | duplicate entry in the same list |
+| E110 | error | `git.path` does not end with the `ci` name |
+| E112 | error | `via` points at this same CI |
+| W001 | warning | file name with no registered catalog kind |
+| W201 | warning | component with `port` but no `protocol` |
+| W202 | warning | data component with `protocol`/`port` |
+| W203 | warning | CI referenced with `component` whose catalog was not loaded: link not checked |
+| W301 | warning | docs folder not found: diagram not written |
+| X001 | error | same `ci` declared in two files |
+| X002 | error | `component` not declared by the referenced CI |
+| X003 | error | link without its mirror on the other side; `blame` names the CI that must add it |
+
+`X002` and `X003` only apply between catalogs loaded in the same run. A reference with `component` to a
+CI whose catalog was not loaded gives `W203`. External systems, which have no `component`, never do.
+
+## In a repository's test suite
 
 ```python
 # tests/test_catalog.py
 from catalog_parser.testing import assert_catalog_valid
 
 def test_catalog_valid():
-    assert_catalog_valid(".")                       # só este repo: E/W; vínculos viram W203
-    # assert_catalog_valid(".", peers=["../outro-repo"], strict=True)   # com vizinhos, confere o espelho
+    assert_catalog_valid(".")                     # this repository only: links become W203
+    # assert_catalog_valid(".", peers=["../other-repo"], strict=True)   # also check the mirrors
 ```
 
-`peers` (ou a variável `CATALOG_PEERS`, separada por `:`) carrega os catálogos dos outros repositórios como
-contexto. Problemas **deles** não são reportados aqui, exceto um peer que aponta para este CI sem espelho
-(X003): a omissão é deste repositório, então é ele que falha. Também vale na linha de comando:
-`uv run catalog-lint .`.
+`peers` (or `$CATALOG_PEERS`) loads other repositories' catalogs as context. Their own problems
+are not reported. The exception is a peer that points at this CI with no mirror here (X003): the
+omission is in this repository, so this repository fails.
 
-## Modelo (resumo)
+## As a library
 
-- **CI**: o sistema (um repositório). **Component**: peça interna do CI; é onde vivem
-  `category`, `technology`, `protocol`, `port`, `criticality` e `description`.
-- Em `dependencies.upstream|downstream`, `ci` + `component` identificam a **outra ponta**;
-  `local_component` é o componente **deste** CI no vínculo.
-- Sistemas externos (sem catálogo) levam as características inline.
+```python
+from pathlib import Path
+from catalog_parser import Linter, RepositoryChecker, Settings, DiagramGenerator
 
-## Adicionar um novo tipo de catálogo
+settings = Settings.discover(".")                 # or Settings.from_file(...), or Settings(...)
+linter = Linter(settings)
+issues = linter.lint_paths([Path("../repo-a"), Path("../repo-b")])
+issues = RepositoryChecker(linter).check(".", peers=[".."])
+result = DiagramGenerator(linter).generate(".", write=False)   # result.markdown
+```
 
-1. Modelos em `src/catalog_parser/models.py` (ou módulo novo) e regras no mesmo molde de `lint.py`.
-2. Registrar o nome do arquivo em `src/catalog_parser/kinds.py` (`FILE_LINTERS`, e `CROSS_LINTERS` se houver regras entre arquivos).
-3. Testes em `tests/`.
+The functions from earlier versions are still available and use the default settings, or the
+discovered ones for repository-level calls. They are `lint_file`, `lint_cross`, `check_repo`,
+`generate_diagram`, `render_mermaid` and `parse_dependencies`.
 
-## No CI de um repositório (GitLab)
+## Extending
+
+Each extension point is a small class, so you add new behaviour without editing the library.
+
+**A rule:** subclass `FileRule` (one catalog) or `CrossRule` (all catalogs of a kind). Each rule owns
+one code.
+
+```python
+from catalog_parser import DEPENDENCIES, CatalogKind, FileRule, Finding, KindRegistry, Linter
+from catalog_parser.issues import WARNING, RuleInfo
+
+class NeedsDescriptionLength(FileRule):
+    info = RuleInfo("C001", WARNING, "component description shorter than 10 characters")
+
+    def check(self, catalog, vocabulary):
+        for i, c in enumerate(catalog.components):
+            if len(c.description) < 10:
+                yield Finding(("components", i, "description"), f"describe '{c.name}' better")
+
+kind = CatalogKind(DEPENDENCIES.filename, DEPENDENCIES.model,
+                   (*DEPENDENCIES.file_rules, NeedsDescriptionLength()), DEPENDENCIES.cross_rules)
+linter = Linter(registry=KindRegistry([kind]))
+```
+
+**A catalog kind** (e.g. `catalog/owners.yml`): write a pydantic model and its rules, then
+`registry.register(CatalogKind("owners.yml", OwnersModel, file_rules=(...)))`. Discovery, line
+numbers, rule selection and the CLI work unchanged. Pass the registry to `cli.main(argv, registry=...)`
+to build your own command.
+
+**An output format:** subclass `Reporter` and add it to `catalog_parser.REPORTERS`. Its key becomes
+a `--format` choice.
+
+## In CI
+
+GitHub Actions:
+
+```yaml
+- uses: astral-sh/setup-uv@v6
+- run: uvx --from "git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0" catalog-lint .
+```
+
+GitLab CI:
 
 ```yaml
 catalog-lint:
-  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim   # ou a imagem padrão do projeto
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
   script:
-    - uvx --from git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0 catalog-lint catalog/dependencies.yml
+    - uvx --from "git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0" catalog-lint .
 ```
 
-## Licença
+## Development
 
-MIT — veja [LICENSE](LICENSE).
+```bash
+uv sync          # library + dev dependencies
+uv run pytest
+```
+
+Code map: `config.py` (settings), `models.py` (schema), `parser.py` (YAML with line numbers),
+`rules/` (one class per code), `kinds.py` (catalog kinds), `discovery.py`, `linter.py`,
+`repository.py` (one repository and its peers), `diagram.py`, `reporters.py` and `cli.py`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
