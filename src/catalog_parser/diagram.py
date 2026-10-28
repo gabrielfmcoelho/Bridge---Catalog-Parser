@@ -16,7 +16,8 @@ from .lint import lint_file
 from .models import Category, Component, Dependency, DependencyCatalog
 
 DEFAULT_DOCS_DIR = "docs"
-DEFAULT_FILENAME = "catalog-dependencies.md"
+DEFAULT_SUBDIR = "catalog"  # generated files live in docs/catalog/, never loose in docs/
+DEFAULT_FILENAME = "dependencies.md"
 
 CLASS_DEFS = {
     "high": "fill:#f8d7da,stroke:#c0392b,color:#000",
@@ -148,12 +149,14 @@ def generate_diagram(
     root: str | Path = ".",
     peers: Iterable[str | Path] | None = None,
     docs_dir: str = DEFAULT_DOCS_DIR,
+    subdir: str = DEFAULT_SUBDIR,
     filename: str = DEFAULT_FILENAME,
     write: bool = True,
 ) -> DiagramResult:
-    """Render the diagram of the repository at `root` and write it to `<root>/<docs_dir>/<filename>`.
+    """Render the diagram of the repository at `root` and write it to `<root>/<docs_dir>/<subdir>/<filename>`.
 
-    A missing docs folder is a W301 warning, never an error: nothing is written and the caller goes on.
+    A missing docs folder is a W301 warning, never an error: nothing is written (and nothing is created)
+    and the caller goes on. When docs exists, the subfolder is created on demand.
     An unreadable or schema-invalid catalog cannot be drawn: `markdown` stays None and the lint errors
     come back in `issues`.
     """
@@ -169,6 +172,8 @@ def generate_diagram(
     if not docs.is_dir():
         result.issues.append(Issue("W301", WARNING, f"docs folder '{docs}' not found; diagram not written", docs))
         return result
-    result.path = docs / filename
+    target = docs / subdir
+    target.mkdir(parents=True, exist_ok=True)
+    result.path = target / filename
     result.path.write_text(markdown, encoding="utf-8")
     return result

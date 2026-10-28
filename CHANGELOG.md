@@ -5,6 +5,24 @@ Uma tag publicada nunca é movida: correções saem em uma versão nova.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+O diagrama passa a viver em uma subpasta própria de `docs/`, com um nome que espelha o catálogo.
+
+### Alterado
+
+- **Mudança de caminho (incompatível com a 0.2.0):** o diagrama é gravado em `docs/catalog/dependencies.md`.
+  Na 0.2.0 era `docs/catalog-dependencies.md`, solto em `docs/`: o nome agora espelha `catalog/dependencies.yml` e fica dentro de `docs/catalog/`. A subpasta é criada
+  quando `docs/` existe; sem `docs/` continua só o aviso `W301`. Novo `--subdir` (parâmetro `subdir` em
+  `generate_diagram`); o padrão de `--filename` passa de `catalog-dependencies.md` para `dependencies.md`.
+  Quem já gerou o arquivo com a 0.2.0 deve apagar o antigo.
+
+### Instalação
+
+```bash
+uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.3.0"
+```
+
 ## [0.2.0] - 2026-10-28
 
 Diagrama Mermaid dos relacionamentos entre CIs e componentes.
@@ -71,6 +89,7 @@ Primeira versão: parser e linter para `catalog/dependencies.yml`.
 uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0"
 ```
 
-[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/releases/tag/v0.1.0

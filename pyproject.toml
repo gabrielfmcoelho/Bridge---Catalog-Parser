@@ -1,6 +1,6 @@
 [project]
 name = "catalog-parser"
-version = "0.2.0"
+version = "0.3.0"
 description = "Parser and linter for the catalog/*.yml files of data lakehouse repositories"
 readme = "README.md"
 license = "MIT"

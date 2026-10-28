@@ -64,8 +64,24 @@ def test_writes_into_docs(tmp_path, pair):
     _, b = pair
     (write(tmp_path, b).parents[1] / "docs").mkdir()
     result = generate_diagram(tmp_path / "svc-b")
-    assert result.path == tmp_path / "svc-b" / "docs" / "catalog-dependencies.md" and result.path.exists()
+    assert result.path == tmp_path / "svc-b" / "docs" / "catalog" / "dependencies.md" and result.path.exists()
     assert result.issues == []
+
+
+def test_files_go_into_docs_catalog_and_never_loose_in_docs(tmp_path, pair):
+    _, b = pair
+    docs = write(tmp_path, b).parents[1] / "docs"
+    docs.mkdir()
+    generate_diagram(tmp_path / "svc-b")
+    assert [p.name for p in docs.iterdir()] == ["catalog"]
+    assert [p.name for p in (docs / "catalog").iterdir()] == ["dependencies.md"]
+
+
+def test_subdir_and_filename_are_configurable(tmp_path, pair):
+    _, b = pair
+    (write(tmp_path, b).parents[1] / "docs").mkdir()
+    assert diagram_main([str(tmp_path / "svc-b"), "--subdir", "map/deps", "--filename", "d.md"]) == 0
+    assert (tmp_path / "svc-b" / "docs" / "map" / "deps" / "d.md").exists()
 
 
 def test_missing_docs_folder_warns_and_does_not_fail(tmp_path, pair, capsys):
@@ -74,7 +90,7 @@ def test_missing_docs_folder_warns_and_does_not_fail(tmp_path, pair, capsys):
     result = generate_diagram(tmp_path / "svc-b")
     assert result.path is None and result.markdown
     assert [(i.code, i.severity) for i in result.issues] == [("W301", "warning")]
-    assert not (tmp_path / "svc-b" / "docs").exists()      # the folder is NOT created for the user
+    assert not (tmp_path / "svc-b" / "docs").exists()      # neither docs/ nor docs/catalog/ is created
     assert diagram_main([str(tmp_path / "svc-b")]) == 0     # warning only
     assert "W301" in capsys.readouterr().err
 
@@ -94,7 +110,7 @@ def test_cli_writes_file_and_accepts_repeatable_peers(tmp_path, pair, capsys):
     (write(tmp_path, b).parents[1] / "docs").mkdir()
     assert diagram_main([str(tmp_path / "svc-b"), "--peers", str(tmp_path / "svc-a"), "--peers", str(tmp_path)]) == 0
     assert "wrote" in capsys.readouterr().out
-    assert 'http:8000"| svc_a_api' in (tmp_path / "svc-b" / "docs" / "catalog-dependencies.md").read_text()
+    assert 'http:8000"| svc_a_api' in (tmp_path / "svc-b" / "docs" / "catalog" / "dependencies.md").read_text()
 
 
 def test_cli_stdout_does_not_need_docs(tmp_path, pair, capsys):

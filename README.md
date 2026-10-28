@@ -11,7 +11,7 @@ uv run catalog-lint ../repo-a ../repo-b                              # varre cat
 uv run catalog-lint caminho/catalog/dependencies.yml                  # um arquivo
 uv run catalog-lint --format json .       # saída para ferramentas
 uv run pytest                             # testes
-uv run catalog-diagram ../repo-a --peers ..     # grava ../repo-a/docs/catalog-dependencies.md (diagrama Mermaid)
+uv run catalog-diagram ../repo-a --peers ..     # grava ../repo-a/docs/catalog/dependencies.md
 ```
 
 Códigos de saída: `0` sem erros · `1` erros (ou avisos com `--strict`) · `2` uso incorreto.
@@ -28,17 +28,18 @@ issues = [i for p in parsed for i in p.issues] + lint_cross(parsed)
 
 ## Diagrama Mermaid
 
-`catalog-diagram [ROOT]` gera `docs/catalog-dependencies.md` no repositório, com o mapa de relacionamentos entre o CI,
+`catalog-diagram [ROOT]` gera `docs/catalog/dependencies.md` no repositório, com o mapa de relacionamentos entre o CI,
 seus componentes, os componentes dos CIs vizinhos e os sistemas externos. `A --> B` = "A depende de B"; o rótulo é o
 protocolo/porta de quem fornece; a cor é a criticidade; cilindro = componente de dados.
 
 ```bash
-uv run catalog-diagram .                        # grava docs/catalog-dependencies.md
+uv run catalog-diagram .                        # grava docs/catalog/dependencies.md
 uv run catalog-diagram . --peers ..             # rotula também os componentes dos vizinhos (repetível, ou $CATALOG_PEERS)
 uv run catalog-diagram . --stdout               # imprime em vez de gravar
 ```
 
-- **Sem pasta `docs/`:** só o aviso `W301` no stderr, código de saída `0`, nada é criado.
+- **Sempre em `docs/catalog/`**, nunca solto em `docs/` (`--subdir` e `--filename` mudam o destino). A subpasta é criada se `docs/` existir.
+- **Sem pasta `docs/`:** só o aviso `W301` no stderr, código de saída `0`, nada é criado (nem `docs/`, nem `docs/catalog/`).
 - **Catálogo inválido:** não há o que desenhar; erros no stderr e código de saída `1`.
 - A saída não tem data/hora, então só muda quando o catálogo muda. Renderiza no GitHub/GitLab e no preview do VS Code.
 - Em Python: `generate_diagram(root, peers=None)` e `render_mermaid(catalog, peers)`.
