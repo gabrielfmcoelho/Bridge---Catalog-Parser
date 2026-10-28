@@ -6,17 +6,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from .issues import ERROR, Issue, format_location
-from .models import DependencyCatalog
+from .config import Settings, Vocabulary
+from .issues import ERROR, Issue, RuleInfo, format_location
+from .models import DEFAULT_VOCABULARY, DependencyCatalog
+
+UNREADABLE = RuleInfo("E001", ERROR, "unreadable file, invalid YAML, or top level is not a mapping")
+SCHEMA = RuleInfo("E002", ERROR, "schema: type, allowed value, unknown field, missing required field")
 
 
 @dataclass
 class Parsed:
     path: Path
-    catalog: DependencyCatalog | None = None
-    root: yaml.Node | None = None  # composed YAML tree, kept to resolve line numbers
+    catalog: BaseModel | None = None  # e.g. a DependencyCatalog; None when the file could not be loaded
+    root: yaml.Node | None = None     # composed YAML tree, kept to resolve line numbers
     issues: list[Issue] = field(default_factory=list)
 
     def line_of(self, loc: tuple) -> int | None:
@@ -44,29 +48,40 @@ def locate(root: yaml.Node | None, loc: tuple) -> int | None:
     return node.start_mark.line + 1
 
 
-def parse_dependencies(path: Path) -> Parsed:
-    """Read and validate the shape of a dependencies.yml. Semantic rules are in lint.py."""
-    parsed = Parsed(path=path)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        parsed.issues.append(Issue("E001", ERROR, f"cannot read file: {e}", path))
+class CatalogParser:
+    """Reads one YAML file into `model` and validates its shape. Semantic rules run later (Linter)."""
+
+    def __init__(self, model: type[BaseModel], vocabulary: Vocabulary = DEFAULT_VOCABULARY):
+        self.model = model
+        self.vocabulary = vocabulary
+
+    def parse(self, path: Path) -> Parsed:
+        parsed = Parsed(path=path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            parsed.issues.append(Issue(UNREADABLE.code, ERROR, f"cannot read file: {e}", path))
+            return parsed
+        try:
+            parsed.root = yaml.compose(text, Loader=yaml.SafeLoader)
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            parsed.issues.append(Issue(UNREADABLE.code, ERROR, f"invalid YAML: {getattr(e, 'problem', e)}",
+                                       path, mark.line + 1 if mark else None))
+            return parsed
+        if not isinstance(data, dict):
+            parsed.issues.append(Issue(UNREADABLE.code, ERROR, "top level must be a mapping", path, 1))
+            return parsed
+        try:
+            parsed.catalog = self.model.model_validate(data, context={"vocabulary": self.vocabulary})
+        except ValidationError as e:
+            for err in e.errors():
+                parsed.issues.append(parsed.issue(SCHEMA.code, ERROR, err["msg"], tuple(err["loc"])))
         return parsed
-    try:
-        parsed.root = yaml.compose(text, Loader=yaml.SafeLoader)
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as e:
-        mark = getattr(e, "problem_mark", None)
-        parsed.issues.append(Issue("E001", ERROR, f"invalid YAML: {getattr(e, 'problem', e)}",
-                                   path, mark.line + 1 if mark else None))
-        return parsed
-    if not isinstance(data, dict):
-        parsed.issues.append(Issue("E001", ERROR, "top level must be a mapping", path, 1))
-        return parsed
-    try:
-        parsed.catalog = DependencyCatalog.model_validate(data)
-    except ValidationError as e:
-        for err in e.errors():
-            loc = tuple(err["loc"])
-            parsed.issues.append(parsed.issue("E002", ERROR, err["msg"], loc))
-    return parsed
+
+
+def parse_dependencies(path: Path, settings: Settings | None = None) -> Parsed:
+    """Read and validate the shape of a dependencies catalog. Semantic rules are in rules/."""
+    vocabulary = settings.vocabulary if settings else DEFAULT_VOCABULARY
+    return CatalogParser(DependencyCatalog, vocabulary).parse(Path(path))

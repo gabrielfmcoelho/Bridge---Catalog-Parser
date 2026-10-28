@@ -1,38 +1,69 @@
-"""Registry of catalog kinds: file name inside a `catalog/` folder -> how to lint it.
+"""Registry of catalog kinds: file name inside the catalog folder -> model and rules.
 
-A new catalog file (e.g. `catalog/owners.yml`) is supported by writing its models + rules and
-adding one entry here; discovery, CLI and output formats need no change."""
+A new catalog file (e.g. `catalog/owners.yml`) is supported by writing its model and rules and
+registering one CatalogKind; discovery, CLI and output formats need no change:
+
+    registry = default_registry()
+    registry.register(CatalogKind("owners.yml", OwnersCatalog, file_rules=(MyRule(),)))
+    Linter(settings, registry).lint_paths([Path(".")])
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
-from .lint import lint_cross, lint_file
-from .parser import Parsed
+from pydantic import BaseModel
 
-# kind file name -> single-file linter
-FILE_LINTERS: dict[str, Callable[[Path], Parsed]] = {
-    "dependencies.yml": lint_file,
-}
-
-# kind file name -> cross-file linter (receives every Parsed of that kind)
-CROSS_LINTERS: dict[str, Callable[[list[Parsed]], list]] = {
-    "dependencies.yml": lint_cross,
-}
-
-SKIP_DIRS = {".git", ".venv", "node_modules", "dbt_packages", "target", "__pycache__"}
+from .config import Vocabulary
+from .models import DependencyCatalog
+from .parser import CatalogParser
+from .rules.base import CrossRule, FileRule, Rule
+from .rules.dependencies import CROSS_RULES, FILE_RULES
 
 
-def discover(paths: list[Path]) -> list[Path]:
-    """Files given explicitly are kept as-is; directories are searched for catalog/<known kind>."""
-    found: list[Path] = []
-    for p in paths:
-        if p.is_file():
-            found.append(p)
-            continue
-        for kind in FILE_LINTERS:
-            for f in sorted(p.rglob(f"catalog/{kind}")):
-                if not SKIP_DIRS & set(f.parts):
-                    found.append(f)
-    return list(dict.fromkeys(found))
+@dataclass(frozen=True)
+class CatalogKind:
+    filename: str
+    model: type[BaseModel]
+    file_rules: tuple[FileRule, ...] = ()
+    cross_rules: tuple[CrossRule, ...] = ()
+
+    def parser(self, vocabulary: Vocabulary) -> CatalogParser:
+        return CatalogParser(self.model, vocabulary)
+
+    @property
+    def rules(self) -> tuple[Rule, ...]:
+        return (*self.file_rules, *self.cross_rules)
+
+
+DEPENDENCIES = CatalogKind("dependencies.yml", DependencyCatalog, FILE_RULES, CROSS_RULES)
+
+
+class KindRegistry:
+    def __init__(self, kinds: Iterable[CatalogKind] = ()):
+        self._kinds: dict[str, CatalogKind] = {}
+        for kind in kinds:
+            self.register(kind)
+
+    def register(self, kind: CatalogKind) -> None:
+        if kind.filename in self._kinds:
+            raise ValueError(f"catalog kind '{kind.filename}' is already registered")
+        self._kinds[kind.filename] = kind
+
+    def get(self, filename: str) -> CatalogKind | None:
+        return self._kinds.get(filename)
+
+    @property
+    def filenames(self) -> tuple[str, ...]:
+        return tuple(self._kinds)
+
+    def rules(self) -> list[Rule]:
+        return [rule for kind in self for rule in kind.rules]
+
+    def __iter__(self) -> Iterator[CatalogKind]:
+        return iter(self._kinds.values())
+
+
+def default_registry() -> KindRegistry:
+    return KindRegistry([DEPENDENCIES])
