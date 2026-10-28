@@ -1,0 +1,28 @@
+[project]
+name = "catalog-parser"
+version = "0.1.0"
+description = "Parser and linter for the catalog/*.yml files of data lakehouse repositories"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+catalog-lint = "catalog_parser.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/catalog_parser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
