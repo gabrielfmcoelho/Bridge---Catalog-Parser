@@ -90,8 +90,8 @@ The behaviour of `catalog-diagram`:
 
 Settings are read from the first of these that applies:
 
-1. `--config FILE` (CLI) or `settings=` (Python);
-2. the file named by `$CATALOG_PARSER_CONFIG`;
+1. `--config FILE|URL` (CLI) or `settings=` (Python);
+2. `$CATALOG_PARSER_CONFIG`, a path or a URL (see [Central rules from a URL](#central-rules-from-a-url));
 3. the nearest `.catalog-parser.toml`, or `pyproject.toml` with a `[tool.catalog-parser]` table,
    searching from the repository (from the working directory for `catalog-lint`) upwards, up to and
    including the first folder that contains `.git`;
@@ -134,8 +134,32 @@ medium = "fill:#fff3cd,stroke:#b7950b,color:#000"
 low    = "fill:#d4edda,stroke:#1e8449,color:#000"
 ```
 
-To share one configuration across many repositories, point `$CATALOG_PARSER_CONFIG` at it (for
-example in CI), or copy the file into each repository.
+### Central rules from a URL
+
+If every repository defines its own vocabulary, whoever writes a catalog also decides what is valid
+in it. To avoid that, keep the config in **one central repository** and read it over HTTPS.
+Nobody has to clone that repository:
+
+```bash
+export CATALOG_PARSER_CONFIG="https://gitlab.example.org/platform/catalog-governance/-/blob/main/.catalog-parser.toml"
+export CATALOG_PARSER_TOKEN="glpat-..."   # only for private projects
+catalog-lint .                            # or --config <URL>; the pytest helper reads the env var too
+```
+
+How each kind of URL is read:
+- **GitLab file page** (`/-/blob/<ref>/<path>` or `/-/raw/...`, as copied from the browser): it
+  is translated into the files API call and sent with `PRIVATE-TOKEN`. The token needs the
+  `read_api` scope and at least Reporter access to the project.
+- **GitLab API URL** (`.../api/v4/...`): used as-is, also with `PRIVATE-TOKEN`.
+- **Any other URL:** used as-is, with `Authorization: Bearer <token>`.
+
+The token is never sent over plain `http://` and never appears in error messages. If the download
+fails, the run stops with exit code `2`, and you get a hint for 401/403/404. It never falls back to
+other settings.
+
+Use a tag as the ref (e.g. `/-/blob/v1/...`) to pin a version of the rules. An explicit config,
+whether a URL or a path, replaces any `.catalog-parser.toml` inside the linted repository; the two
+are never merged.
 
 ## Rules
 
@@ -255,7 +279,7 @@ uv sync          # library + dev dependencies
 uv run pytest
 ```
 
-Code map: `config.py` (settings), `models.py` (schema), `parser.py` (YAML with line numbers),
+Code map: `config.py` (settings), `remote.py` (config over HTTPS), `models.py` (schema), `parser.py` (YAML with line numbers),
 `rules/` (one class per code), `kinds.py` (catalog kinds), `discovery.py`, `linter.py`,
 `repository.py` (one repository and its peers), `diagram.py`, `reporters.py` and `cli.py`.
 

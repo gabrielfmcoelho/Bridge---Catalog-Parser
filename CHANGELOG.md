@@ -18,7 +18,13 @@ classes that you extend without editing the library.
   `[layout]` (catalog folder, peers env var, skipped folders), `[rules]` (`select`/`ignore` by code
   or prefix) and `[diagram]` (paths, direction, title, legend, colours per criticality).
   An unknown key is a configuration error (exit code `2`).
-- CLI: `--config FILE` on both commands; `catalog-lint --select/--ignore CODES` and `--list-rules`.
+- **Config from a URL**, so the rules can live in a central repository that nobody clones:
+  `--config URL` or `CATALOG_PARSER_CONFIG=URL`, with the token in `$CATALOG_PARSER_TOKEN`.
+  A GitLab file page (`/-/blob/<ref>/<path>`) is translated into the files API call and sent with
+  `PRIVATE-TOKEN`; other URLs get `Authorization: Bearer`. The token is never sent over plain http
+  and never printed. A failed download is a configuration error (exit code `2`), never a fallback.
+  This uses only the standard library, so there is no new dependency.
+- CLI: `--config FILE|URL` on both commands; `catalog-lint --select/--ignore CODES` and `--list-rules`.
 - Extension points: `FileRule`/`CrossRule` (one class per code), `CatalogKind` + `KindRegistry`,
   `Reporter` + `REPORTERS`, and the services `Linter`, `RepositoryChecker`, `DiagramGenerator`,
   `MermaidRenderer` and `CatalogDiscoverer`, all exported from `catalog_parser`.

@@ -1,7 +1,8 @@
 """Settings: every project-specific value (vocabularies, folder layout, enabled rules, diagram look).
 
-Read from `.catalog-parser.toml` or from the `[tool.catalog-parser]` table of `pyproject.toml`.
-Everything has a default, so a project without a config file works out of the box:
+Read from `.catalog-parser.toml`, from the `[tool.catalog-parser]` table of `pyproject.toml`, or
+from a URL (remote.py) when the rules live in a central repository. Everything has a default, so a
+project without a config file works out of the box:
 
     [vocabulary]                  # omit a list to accept any value
     technologies = ["postgresql", "redis", "rest-api"]
@@ -22,7 +23,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-CONFIG_ENV = "CATALOG_PARSER_CONFIG"  # path of a config file, used when none is given explicitly
+from .remote import RemoteConfigLoader, RemoteError, is_url
+
+CONFIG_ENV = "CATALOG_PARSER_CONFIG"  # path or URL of a config file, used when none is given explicitly
 CONFIG_FILE = ".catalog-parser.toml"
 PYPROJECT = "pyproject.toml"
 PYPROJECT_TABLE = "catalog-parser"    # [tool.catalog-parser]
@@ -191,7 +194,7 @@ class Settings:
     layout: Layout = field(default_factory=Layout)
     rules: RuleSelection = field(default_factory=RuleSelection)
     diagram: DiagramSettings = field(default_factory=DiagramSettings)
-    source: Path | None = None  # file the settings were read from, None for the defaults
+    source: Path | str | None = None  # file or URL the settings were read from, None for the defaults
 
     _SECTIONS = {
         "vocabulary": (Vocabulary, {"technologies", "protocols", "git_providers", "categories",
@@ -211,27 +214,50 @@ class Settings:
         return cls(**kw, source=source)
 
     @classmethod
-    def from_file(cls, path: str | Path) -> Settings:
-        """A `.catalog-parser.toml` (the whole file) or a `pyproject.toml` (its [tool.catalog-parser] table)."""
-        path = Path(path)
+    def from_text(cls, text: str, name: str, source: Path | str | None = None) -> Settings:
+        """TOML of a `.catalog-parser.toml` (the whole file) or of a `pyproject.toml` (its
+        [tool.catalog-parser] table, told apart by `name`)."""
         try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as e:
-            raise ConfigError(f"cannot read config {path}: {e}") from e
-        if path.name == PYPROJECT:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError(f"cannot read config {source}: {e}") from e
+        if name == PYPROJECT:
             data = data.get("tool", {}).get(PYPROJECT_TABLE, {})
         try:
-            return cls.from_mapping(data, source=path)
+            return cls.from_mapping(data, source=source)
         except ConfigError as e:
-            raise ConfigError(f"{path}: {e}") from e
+            raise ConfigError(f"{source}: {e}") from e
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> Settings:
+        path = Path(path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise ConfigError(f"cannot read config {path}: {e}") from e
+        return cls.from_text(text, path.name, source=path)
+
+    @classmethod
+    def from_url(cls, url: str, loader: RemoteConfigLoader | None = None) -> Settings:
+        """A config served over HTTPS, e.g. a GitLab file page (see remote.py); token in $CATALOG_PARSER_TOKEN."""
+        try:
+            text, name = (loader or RemoteConfigLoader()).read(url)
+        except RemoteError as e:
+            raise ConfigError(str(e)) from None
+        return cls.from_text(text, name, source=url)
+
+    @classmethod
+    def load(cls, location: str | Path, loader: RemoteConfigLoader | None = None) -> Settings:
+        """A config file path or URL."""
+        return cls.from_url(str(location), loader) if is_url(location) else cls.from_file(location)
 
     @classmethod
     def discover(cls, start: str | Path = ".") -> Settings:
-        """$CATALOG_PARSER_CONFIG, else the nearest config file from `start` up to the repository
-        boundary (a folder with `.git`), else the defaults."""
+        """$CATALOG_PARSER_CONFIG (path or URL), else the nearest config file from `start` up to the
+        repository boundary (a folder with `.git`), else the defaults."""
         env = os.environ.get(CONFIG_ENV)
         if env:
-            return cls.from_file(env)
+            return cls.load(env)
         found = find_config(start)
         return cls.from_file(found) if found else cls()
 

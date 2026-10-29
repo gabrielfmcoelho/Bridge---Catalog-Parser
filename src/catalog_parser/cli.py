@@ -24,14 +24,14 @@ def _codes(values: list[str] | None) -> frozenset[str] | None:
     return frozenset(c.strip() for v in values for c in v.split(",") if c.strip())
 
 
-def _settings(config: Path | None, start: Path) -> Settings:
-    return Settings.from_file(config) if config else Settings.discover(start)
+def _settings(config: str | None, start: Path) -> Settings:
+    return Settings.load(config) if config else Settings.discover(start)
 
 
 def _add_config(ap: argparse.ArgumentParser) -> None:
-    ap.add_argument("--config", type=Path, metavar="FILE",
-                    help="config file (.catalog-parser.toml or pyproject.toml); default: $CATALOG_PARSER_CONFIG, "
-                         "else the nearest one found")
+    ap.add_argument("--config", metavar="FILE|URL",
+                    help="config file (.catalog-parser.toml or pyproject.toml) or URL, e.g. a GitLab file page "
+                         "(token in $CATALOG_PARSER_TOKEN); default: $CATALOG_PARSER_CONFIG, else the nearest one found")
 
 
 def list_rules(registry: KindRegistry) -> None:
