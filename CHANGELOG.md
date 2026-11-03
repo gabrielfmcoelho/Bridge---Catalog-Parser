@@ -5,7 +5,9 @@ A published tag is never moved: fixes ship in a new version. Entries up to 0.3.0
 
 ## [Unreleased]
 
-To be released as **0.4.0**. The project becomes generic and open-source: every value that was
+## [0.4.0] - 2026-11-03
+
+The project becomes generic and open-source: every value that was
 specific to one organisation now comes from configuration, and the code is reorganised into small
 classes that you extend without editing the library.
 
@@ -68,6 +70,12 @@ classes that you extend without editing the library.
 
 With the default settings, the lint findings and the diagrams of existing catalogs are byte-for-byte
 the same as in 0.3.0.
+
+### Installation
+
+```bash
+uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0"
+```
 
 ## [0.3.0] - 2026-10-28
 
@@ -153,7 +161,8 @@ Primeira versão: parser e linter para `catalog/dependencies.yml`.
 uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0"
 ```
 
-[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/releases/tag/v0.1.0
