@@ -2,17 +2,34 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 
-ERROR = "error"
-WARNING = "warning"
+
+class Severity(StrEnum):
+    ERROR = "error"
+    WARNING = "warning"
+
+
+ERROR = Severity.ERROR
+WARNING = Severity.WARNING
+
+
+@dataclass(frozen=True)
+class RuleInfo:
+    """What a finding code means: shown by `catalog-lint --list-rules`."""
+
+    code: str          # E### single-file error, W### warning, X### cross-file error
+    severity: Severity
+    summary: str
 
 
 @dataclass(frozen=True)
 class Issue:
-    code: str          # E### single-file error, W### warning, X### cross-file error
-    severity: str      # ERROR | WARNING
+    code: str
+    severity: Severity
     message: str
     path: Path
     line: int | None = None
@@ -27,7 +44,12 @@ class Issue:
     def to_dict(self) -> dict:
         d = asdict(self)
         d["path"] = str(self.path)
+        d["severity"] = str(self.severity)
         return d
+
+
+def sort_issues(issues: Iterable[Issue]) -> list[Issue]:
+    return sorted(issues, key=lambda i: (str(i.path), i.line or 0, i.code))
 
 
 def format_location(loc: tuple) -> str:
