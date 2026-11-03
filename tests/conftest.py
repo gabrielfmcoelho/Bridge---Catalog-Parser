@@ -9,6 +9,16 @@ import yaml
 from catalog_parser import lint_cross, lint_file
 
 
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path, monkeypatch):
+    """No developer setup leaks in: no CATALOG_PARSER_* variables, and the working directory (where
+    catalog-lint looks for config and .env) is the test's own folder."""
+    import os
+    for key in [k for k in os.environ if k.startswith("CATALOG_PARSER_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.chdir(tmp_path)
+
+
 def component(name="api", **over):
     c = {"name": name, "category": "application", "technology": "rest-api", "protocol": "http",
          "port": 8000, "criticality": "high", "description": "desc"}

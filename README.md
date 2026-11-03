@@ -91,7 +91,7 @@ The behaviour of `catalog-diagram`:
 Settings are read from the first of these that applies:
 
 1. `--config FILE|URL` (CLI) or `settings=` (Python);
-2. `$CATALOG_PARSER_CONFIG`, a path or a URL (see [Central rules from a URL](#central-rules-from-a-url));
+2. `$CATALOG_PARSER_CONFIG`, a path or a URL, from the environment or a `.env` file (see [Central rules from a URL](#central-rules-from-a-url));
 3. the nearest `.catalog-parser.toml`, or `pyproject.toml` with a `[tool.catalog-parser]` table,
    searching from the repository (from the working directory for `catalog-lint`) upwards, up to and
    including the first folder that contains `.git`;
@@ -141,10 +141,19 @@ in it. To avoid that, keep the config in **one central repository** and read it 
 Nobody has to clone that repository:
 
 ```bash
-export CATALOG_PARSER_CONFIG="https://gitlab.example.org/platform/catalog-governance/-/blob/main/.catalog-parser.toml"
-export CATALOG_PARSER_TOKEN="glpat-..."   # only for private projects
-catalog-lint .                            # or --config <URL>; the pytest helper reads the env var too
+# .env in the linted repository (see .env.example; keep .env in .gitignore, it holds a token)
+CATALOG_PARSER_CONFIG=https://gitlab.example.org/platform/catalog-governance/-/blob/main/.catalog-parser.toml
+CATALOG_PARSER_TOKEN=glpat-...            # only for private projects
 ```
+
+```bash
+catalog-lint .                            # or --config <URL>; the pytest helper reads the same variables
+```
+
+The two variables can come from the shell environment or from a `.env` file. The `.env` is
+searched from the linted repository up to its `.git` (for `catalog-lint`, from the working
+directory). Only the `CATALOG_PARSER_*` keys are read, so the repository's own `.env` can hold
+them next to its other variables. A variable exported in the shell wins over the file.
 
 How each kind of URL is read:
 - **GitLab file page** (`/-/blob/<ref>/<path>` or `/-/raw/...`, as copied from the browser): it
@@ -279,7 +288,7 @@ uv sync          # library + dev dependencies
 uv run pytest
 ```
 
-Code map: `config.py` (settings), `remote.py` (config over HTTPS), `models.py` (schema), `parser.py` (YAML with line numbers),
+Code map: `config.py` (settings), `remote.py` (config over HTTPS), `dotenv.py` (`.env` variables), `models.py` (schema), `parser.py` (YAML with line numbers),
 `rules/` (one class per code), `kinds.py` (catalog kinds), `discovery.py`, `linter.py`,
 `repository.py` (one repository and its peers), `diagram.py`, `reporters.py` and `cli.py`.
 

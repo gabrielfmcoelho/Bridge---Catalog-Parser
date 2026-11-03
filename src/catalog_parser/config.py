@@ -16,14 +16,14 @@ project without a config file works out of the box:
 
 from __future__ import annotations
 
-import os
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .remote import RemoteConfigLoader, RemoteError, is_url
+from .dotenv import catalog_env
+from .remote import TOKEN_ENV, RemoteConfigLoader, RemoteError, is_url
 
 CONFIG_ENV = "CATALOG_PARSER_CONFIG"  # path or URL of a config file, used when none is given explicitly
 CONFIG_FILE = ".catalog-parser.toml"
@@ -254,10 +254,17 @@ class Settings:
     @classmethod
     def discover(cls, start: str | Path = ".") -> Settings:
         """$CATALOG_PARSER_CONFIG (path or URL), else the nearest config file from `start` up to the
-        repository boundary (a folder with `.git`), else the defaults."""
-        env = os.environ.get(CONFIG_ENV)
-        if env:
-            return cls.load(env)
+        repository boundary (a folder with `.git`), else the defaults. See `resolve`."""
+        return cls.resolve(None, start)
+
+    @classmethod
+    def resolve(cls, config: str | Path | None = None, start: str | Path = ".") -> Settings:
+        """`config` (path or URL) when given, else `discover`'s order. $CATALOG_PARSER_CONFIG and
+        $CATALOG_PARSER_TOKEN come from the environment or from the `.env` found from `start` (dotenv.py)."""
+        env = catalog_env(start)
+        location = config or env.get(CONFIG_ENV)
+        if location:
+            return cls.load(location, RemoteConfigLoader(token=env.get(TOKEN_ENV, "")))
         found = find_config(start)
         return cls.from_file(found) if found else cls()
 

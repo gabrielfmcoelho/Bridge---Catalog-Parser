@@ -24,6 +24,10 @@ classes that you extend without editing the library.
   `PRIVATE-TOKEN`; other URLs get `Authorization: Bearer`. The token is never sent over plain http
   and never printed. A failed download is a configuration error (exit code `2`), never a fallback.
   This uses only the standard library, so there is no new dependency.
+- **`.env` support:** `CATALOG_PARSER_CONFIG` and `CATALOG_PARSER_TOKEN` can live in a `.env`
+  file instead of being exported. The file is searched from the linted repository up to its
+  `.git`. Only `CATALOG_PARSER_*` keys are read, and the shell environment wins over the file.
+  `.env.example` documents the keys.
 - CLI: `--config FILE|URL` on both commands; `catalog-lint --select/--ignore CODES` and `--list-rules`.
 - Extension points: `FileRule`/`CrossRule` (one class per code), `CatalogKind` + `KindRegistry`,
   `Reporter` + `REPORTERS`, and the services `Linter`, `RepositoryChecker`, `DiagramGenerator`,

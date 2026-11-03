@@ -25,13 +25,14 @@ def _codes(values: list[str] | None) -> frozenset[str] | None:
 
 
 def _settings(config: str | None, start: Path) -> Settings:
-    return Settings.load(config) if config else Settings.discover(start)
+    return Settings.resolve(config, start)
 
 
 def _add_config(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--config", metavar="FILE|URL",
                     help="config file (.catalog-parser.toml or pyproject.toml) or URL, e.g. a GitLab file page "
-                         "(token in $CATALOG_PARSER_TOKEN); default: $CATALOG_PARSER_CONFIG, else the nearest one found")
+                         "(token in $CATALOG_PARSER_TOKEN); default: $CATALOG_PARSER_CONFIG, else the nearest one found. "
+                         "CATALOG_PARSER_* variables may also come from a .env file")
 
 
 def list_rules(registry: KindRegistry) -> None:
