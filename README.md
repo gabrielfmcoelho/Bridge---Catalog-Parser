@@ -23,6 +23,84 @@ uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---C
 
 Requires Python 3.11+.
 
+## Instructions on how to execute
+
+### 1. Point to your rules (once per repository)
+
+Add the two variables to the `.env` of each repository that has a catalog, and keep `.env` in its
+`.gitignore`, because the file holds a token. [`.env.example`](.env.example) lists the keys.
+
+```bash
+# <repo>/.env
+CATALOG_PARSER_CONFIG=https://gitlab.example.org/platform/catalog-governance/-/blob/main/.catalog-parser.toml
+CATALOG_PARSER_TOKEN=glpat-...            # read_api scope; only for private projects
+```
+
+`CATALOG_PARSER_CONFIG` can also be a local path. See [Central rules from a URL](#central-rules-from-a-url)
+for how the URL and the token are used.
+
+### 2. Run
+
+Without installing anything (`uvx` downloads and runs it):
+
+```bash
+cd my-repo
+uvx --from "git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0" catalog-lint --no-cross .
+```
+
+Or install it once as a global tool:
+
+```bash
+uv tool install "git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0"
+cd my-repo
+catalog-lint --no-cross .
+```
+
+**One repository:** use `--no-cross` when the other repositories are not next to it. Without it,
+every link to a catalog that was not loaded becomes a `W203` warning.
+
+**All repositories at once:** run from the folder that holds them side by side. This also runs
+the cross-repository rules (`X001`–`X003`, such as a missing mirror):
+
+```bash
+cd workspace                              # contains repo-a/, repo-b/, ...
+catalog-lint repo-a repo-b repo-c
+```
+
+Here the `.env` search starts in `workspace/`, not inside each repository, so that folder needs its
+own `.env` with the same two lines. If `workspace/` is itself a Git repository, ignore `.env` there too.
+
+**The diagram** is a separate command: `catalog-diagram . --peers ..` writes
+`docs/catalog/dependencies.md`.
+
+Useful options:
+
+| Option | Use it to |
+|---|---|
+| `--no-cross` | lint one repository alone |
+| `--strict` | fail (exit `1`) on warnings too |
+| `--format json` | get machine-readable output |
+| `--select E1` / `--ignore E110` | choose rules by code or prefix |
+| `--list-rules` | list every code and its meaning |
+| `--config FILE\|URL` | override the `.env` for one run, e.g. to try the rules of another branch |
+
+Exit codes: `0` no errors · `1` errors (or warnings with `--strict`) · `2` usage, configuration or
+access error (token, URL).
+
+### What happens when the variables are missing
+
+| Situation | Result |
+|---|---|
+| No `CATALOG_PARSER_CONFIG` anywhere (shell, `.env`, `--config`) and no local config file | The built-in [defaults](#configuration) are used: `technology`, `protocol` and `git.type` accept **any** value, while the structural rules still run. **Nothing tells you this happened**, so check the `.env` before trusting a clean result. |
+| `CATALOG_PARSER_TOKEN` without `CATALOG_PARSER_CONFIG` | The token is ignored; it is only used to download a remote config. |
+| `CATALOG_PARSER_CONFIG` is a URL to a private project, and the token is missing or wrong | The server answers 401/403/404 and the run stops with exit code `2` and a hint. It never falls back to the defaults. |
+
+### If the project pins catalog-parser
+
+In a repository that has catalog-parser as a dev dependency, `uv run catalog-lint` runs the
+**pinned** version. Versions before 0.4.0 read neither `.env` nor a config URL, so use `uvx` or
+`uv tool` as above, or bump the pin.
+
 ## The catalog
 
 ```yaml
