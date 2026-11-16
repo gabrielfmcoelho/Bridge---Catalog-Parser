@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from .config import Vocabulary
-from .models import DependencyCatalog
+from .config import SchemaSettings, Vocabulary
+from .models import DEFAULT_SCHEMA, DependencyCatalog
 from .parser import CatalogParser
 from .rules.base import CrossRule, FileRule, Rule
 from .rules.dependencies import CROSS_RULES, FILE_RULES
@@ -29,8 +29,8 @@ class CatalogKind:
     file_rules: tuple[FileRule, ...] = ()
     cross_rules: tuple[CrossRule, ...] = ()
 
-    def parser(self, vocabulary: Vocabulary) -> CatalogParser:
-        return CatalogParser(self.model, vocabulary)
+    def parser(self, vocabulary: Vocabulary, schema: SchemaSettings = DEFAULT_SCHEMA) -> CatalogParser:
+        return CatalogParser(self.model, vocabulary, schema)
 
     @property
     def rules(self) -> tuple[Rule, ...]:
@@ -46,8 +46,8 @@ class KindRegistry:
         for kind in kinds:
             self.register(kind)
 
-    def register(self, kind: CatalogKind) -> None:
-        if kind.filename in self._kinds:
+    def register(self, kind: CatalogKind, *, replace: bool = False) -> None:
+        if not replace and kind.filename in self._kinds:
             raise ValueError(f"catalog kind '{kind.filename}' is already registered")
         self._kinds[kind.filename] = kind
 

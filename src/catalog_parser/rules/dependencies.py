@@ -5,14 +5,14 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Iterator, Sequence
 
-from ..config import Vocabulary
+from ..config import DEFAULT_EXTERNAL_REQUIRED, Settings, Vocabulary
 from ..issues import ERROR, WARNING, RuleInfo
 from ..models import Component, Dependency, DependencyCatalog
 from ..parser import Parsed
 from .base import CrossRule, FileRule, Finding
 
 INLINE_TRAITS = ("category", "technology", "protocol", "port", "criticality", "description")
-EXTERNAL_REQUIRED = ("category", "technology", "criticality", "description")
+EXTERNAL_REQUIRED = DEFAULT_EXTERNAL_REQUIRED
 SIDES = ("upstream", "downstream")
 
 
@@ -36,7 +36,7 @@ class GitPathMatchesCi(FileRule):
     info = RuleInfo("E110", ERROR, "`git.path` does not end with the `ci` name")
 
     def check(self, catalog: DependencyCatalog, vocabulary: Vocabulary) -> Iterator[Finding]:
-        if catalog.git.path.rstrip("/").rsplit("/", 1)[-1] != catalog.ci:
+        if catalog.git is not None and catalog.git.path.rstrip("/").rsplit("/", 1)[-1] != catalog.ci:
             yield Finding(("git", "path"), f"git.path should end with the ci name '{catalog.ci}'")
 
 
@@ -96,7 +96,7 @@ class EntryRule(FileRule):
 class SelfDependency(EntryRule):
     info = RuleInfo("E108", ERROR, "CI depending on itself")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         if dep.ci == catalog.ci:
             yield Finding(at + ("ci",), "a CI cannot depend on itself")
 
@@ -104,7 +104,7 @@ class SelfDependency(EntryRule):
 class SelfVia(EntryRule):
     info = RuleInfo("E112", ERROR, "`via` points at this same CI")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         if dep.via == catalog.ci:
             yield Finding(at + ("via",), "`via` points at this same CI")
 
@@ -112,10 +112,12 @@ class SelfVia(EntryRule):
 class UnknownLocalComponent(EntryRule):
     info = RuleInfo("E102", ERROR, "`local_component` not declared in this file")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         if dep.local_component is not None and dep.local_component not in {c.name for c in catalog.components}:
-            yield Finding(at + ("local_component",),
-                          f"local_component '{dep.local_component}' is not declared in components")
+            yield Finding(
+                at + ("local_component",),
+                f"local_component '{dep.local_component}' is not declared in components",
+            )
 
 
 class DuplicateEntry(FileRule):
@@ -126,15 +128,17 @@ class DuplicateEntry(FileRule):
         for side, i, dep in entries(catalog):
             key = (side, dep.ci, dep.component, dep.local_component)
             if key in seen:
-                yield Finding(("dependencies", side, i),
-                              f"duplicate entry for {dep.ci}/{dep.component} (local {dep.local_component})")
+                yield Finding(
+                    ("dependencies", side, i),
+                    f"duplicate entry for {dep.ci}/{dep.component} (local {dep.local_component})",
+                )
             seen.add(key)
 
 
 class TraitsOnLinkedEntry(EntryRule):
     info = RuleInfo("E103", ERROR, "inline traits on an entry with `component` (traits live on the component)")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         traits = set_traits(dep)
         if dep.component is not None and traits:
             yield Finding(at, f"traits {traits} belong on {dep.ci}'s component '{dep.component}', not here")
@@ -143,7 +147,7 @@ class TraitsOnLinkedEntry(EntryRule):
 class LinkedEntryWithoutLocalComponent(EntryRule):
     info = RuleInfo("E106", ERROR, "entry with `component` but no `local_component`")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         if dep.component is not None and dep.local_component is None:
             yield Finding(at, "entry with `component` needs `local_component`")
 
@@ -151,7 +155,7 @@ class LinkedEntryWithoutLocalComponent(EntryRule):
 class TraitsOnPlainDownstream(EntryRule):
     info = RuleInfo("E105", ERROR, "`downstream` entry without `component` carrying traits")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         traits = set_traits(dep)
         if dep.component is None and side == "downstream" and traits:
             yield Finding(at, f"downstream entry without `component` cannot carry traits {traits}")
@@ -160,9 +164,23 @@ class TraitsOnPlainDownstream(EntryRule):
 class ExternalMissingTraits(EntryRule):
     info = RuleInfo("E104", ERROR, "external `upstream` without `category`/`technology`/`criticality`/`description`")
 
-    def check_entry(self, catalog, side, dep, at):
+    def __init__(self, required_traits: tuple[str, ...] = EXTERNAL_REQUIRED):
+        self.required_traits = required_traits
+
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
+        yield from self._check_traits(dep, side, at, self.required_traits)
+
+    def check_with_settings(self, catalog: DependencyCatalog, settings: Settings) -> Iterator[Finding]:
+        for side, i, dep in entries(catalog):
+            yield from self._check_traits(
+                dep, side, ("dependencies", side, i), settings.schema.external_required_traits
+            )
+
+    def _check_traits(
+        self, dep: Dependency, side: str, at: tuple, required_traits: tuple[str, ...]
+    ) -> Iterator[Finding]:
         if dep.component is None and side == "upstream":
-            missing = [t for t in EXTERNAL_REQUIRED if getattr(dep, t) is None]
+            missing = [t for t in required_traits if getattr(dep, t) is None]
             if missing:
                 yield Finding(at, f"external system '{dep.ci}' is missing {missing}")
 
@@ -170,7 +188,7 @@ class ExternalMissingTraits(EntryRule):
 class DownstreamWithoutLocalComponent(EntryRule):
     info = RuleInfo("E107", ERROR, "`downstream` entry without `local_component`")
 
-    def check_entry(self, catalog, side, dep, at):
+    def check_entry(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple) -> Iterator[Finding]:
         if side == "downstream" and dep.local_component is None:
             yield Finding(at, "downstream entry needs `local_component`")
 
@@ -206,27 +224,41 @@ class LinkRule(CrossRule):
             for side, i, dep in entries(p.catalog):
                 if dep.component is not None:
                     other = by_ci.get(dep.ci)
-                    for finding in self.check_link(p.catalog, side, dep, ("dependencies", side, i),
-                                                   other.catalog if other else None):
+                    for finding in self.check_link(
+                        p.catalog, side, dep, ("dependencies", side, i), other.catalog if other else None
+                    ):
                         yield p, finding
 
     @abstractmethod
-    def check_link(self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple,
-                   other: DependencyCatalog | None) -> Iterator[Finding]: ...
+    def check_link(
+        self,
+        catalog: DependencyCatalog,
+        side: str,
+        dep: Dependency,
+        at: tuple,
+        other: DependencyCatalog | None,
+    ) -> Iterator[Finding]: ...
 
 
 class UncheckedLink(LinkRule):
     info = RuleInfo("W203", WARNING, "CI referenced with `component` but its catalog was not loaded: link not checked")
 
-    def check_link(self, catalog, side, dep, at, other):
+    def check_link(
+        self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple, other: DependencyCatalog | None
+    ) -> Iterator[Finding]:
         if other is None:
-            yield Finding(at + ("ci",), f"catalog of '{dep.ci}' was not loaded: link to {dep.ci}/{dep.component} not checked")
+            yield Finding(
+                at + ("ci",),
+                f"catalog of '{dep.ci}' was not loaded: link to {dep.ci}/{dep.component} not checked",
+            )
 
 
 class UnknownRemoteComponent(LinkRule):
     info = RuleInfo("X002", ERROR, "`component` not declared by the referenced CI")
 
-    def check_link(self, catalog, side, dep, at, other):
+    def check_link(
+        self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple, other: DependencyCatalog | None
+    ) -> Iterator[Finding]:
         if other is not None and dep.component not in {c.name for c in other.components}:
             yield Finding(at + ("component",), f"component '{dep.component}' is not declared by {dep.ci}")
 
@@ -234,25 +266,41 @@ class UnknownRemoteComponent(LinkRule):
 class MissingMirror(LinkRule):
     info = RuleInfo("X003", ERROR, "link without the mirror entry on the other side; `blame` = the CI that must add it")
 
-    def check_link(self, catalog, side, dep, at, other):
+    def check_link(
+        self, catalog: DependencyCatalog, side: str, dep: Dependency, at: tuple, other: DependencyCatalog | None
+    ) -> Iterator[Finding]:
         if other is None or dep.local_component is None:  # W203 / E106-E107 already say so
             return
         if dep.component not in {c.name for c in other.components}:  # X002 already says so
             return
         back = opposite(side)
-        mirrored = any(o.ci == catalog.ci and o.component == dep.local_component and o.local_component == dep.component
-                       for o in getattr(other.dependencies, back))
+        mirrored = any(
+            o.ci == catalog.ci and o.component == dep.local_component and o.local_component == dep.component
+            for o in getattr(other.dependencies, back)
+        )
         if not mirrored:
-            yield Finding(at, f"{dep.ci}.{back} has no entry (ci: {catalog.ci}, component: {dep.local_component}, "
-                              f"local_component: {dep.component})", blame=dep.ci)
+            yield Finding(
+                at,
+                f"{dep.ci}.{back} has no entry (ci: {catalog.ci}, component: {dep.local_component}, "
+                f"local_component: {dep.component})",
+                blame=dep.ci,
+            )
 
 
 FILE_RULES: tuple[FileRule, ...] = (
     GitPathMatchesCi(),
-    DuplicateComponent(), PortWithoutProtocol(), DataComponentWithEndpoint(),
-    SelfDependency(), SelfVia(), UnknownLocalComponent(), DuplicateEntry(),
-    TraitsOnLinkedEntry(), LinkedEntryWithoutLocalComponent(), TraitsOnPlainDownstream(),
-    ExternalMissingTraits(), DownstreamWithoutLocalComponent(),
+    DuplicateComponent(),
+    PortWithoutProtocol(),
+    DataComponentWithEndpoint(),
+    SelfDependency(),
+    SelfVia(),
+    UnknownLocalComponent(),
+    DuplicateEntry(),
+    TraitsOnLinkedEntry(),
+    LinkedEntryWithoutLocalComponent(),
+    TraitsOnPlainDownstream(),
+    ExternalMissingTraits(),
+    DownstreamWithoutLocalComponent(),
 )
 
 CROSS_RULES: tuple[CrossRule, ...] = (DuplicateCi(), UncheckedLink(), UnknownRemoteComponent(), MissingMirror())

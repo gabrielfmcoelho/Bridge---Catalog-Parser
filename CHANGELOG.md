@@ -5,6 +5,37 @@ A published tag is never moved: fixes ship in a new version. Entries up to 0.3.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+Deep parametrization and multi-provider remote governance repository support for open-source adoption.
+
+### Added
+
+- **Multi-provider remote configuration & relative resolution (`remote.py`):**
+  - Native URL adapters (`RemoteProvider`) for **GitHub** (`/blob/<ref>/<path>` and `api.github.com/repos/.../contents/...`), **Bitbucket** (`/src/<ref>/<path>`), **GitLab** (`/-/blob/` and `/api/v4/`), and generic HTTPS hosts.
+  - Custom authentication header support via `$CATALOG_PARSER_AUTH_HEADER`.
+  - Relative URL/path resolution (`RemoteFile.resolve_relative`, `resolve_location`) across all providers so remote configs can reference sibling/parent configs and peer catalogs inside the same governance repository.
+  - Optional local TTL cache (`RemoteCache`) controlled by `$CATALOG_PARSER_CACHE_TTL` and `$CATALOG_PARSER_CACHE_DIR`.
+- **Config inheritance (`extends`) and governance locking (`locked`) (`config.py`):**
+  - Config files (local or remote) can inherit from one or more base configs via `extends = "https://..."` or `extends = ["./base.toml"]`, with cycle detection and deep section merging.
+  - Base configs can lock sections (`locked = ["vocabulary", "schema"]`) to prevent downstream repositories from overriding organization-wide rules.
+- **Configurable `[schema]` policies (`config.py`, `models.py`, `rules/dependencies.py`):**
+  - `slug_pattern`: custom regex for `ci`, `component`, `entity.slug`, and `via`.
+  - `required_fields`: choose which top-level sections (`owners`, `entity`, `git`, `components`) are mandatory (defaults to `["owners", "entity", "git"]`).
+  - `external_required_traits`: customize required inline traits for external `upstream` dependencies (`E104`).
+  - `metadata` field on `DependencyCatalog`, `Component`, and `Dependency`, with `required_metadata` validation in `[schema]`.
+  - `allow_extra_fields`: optionally permit unknown YAML keys.
+- **Extended `[vocabulary]` and `[rules]`:**
+  - `vocabulary.entity_types` to govern `entity[].type` values, and `[vocabulary.custom]` for custom rule vocabularies.
+  - `[rules.severity]` to override the severity (`error` or `warning`) of any finding code.
+  - `[rules].plugins` and `catalog_parser.plugins` entry points (`plugins.py`) to load custom rules, `CatalogKind`s, and `Reporter`s directly from the CLI.
+- **Remote peers (`repository.py`, `linter.py`):**
+  - `PeerLoader` and `[layout].peers` now accept remote URLs (including relative paths resolved against the remote governance config) in addition to local paths.
+- **JSON Schema export (`schema_export.py`, `cli.py`):**
+  - `catalog-lint --dump-schema catalog` (reflecting the active vocabulary and schema rules) and `catalog-lint --dump-schema config`.
+- **Open-source documentation & tooling:**
+  - Added `CONTRIBUTING.md` and `ruff`/`mypy` configuration in `pyproject.toml`.
+
 ## [0.4.0] - 2026-11-03
 
 The project becomes generic and open-source: every value that was
@@ -36,133 +67,3 @@ classes that you extend without editing the library.
   `MermaidRenderer` and `CatalogDiscoverer`, all exported from `catalog_parser`.
 - `examples/` with two repositories that link to each other, a shared config, and the generated diagram.
 - `py.typed`, package metadata (URLs, classifiers), and a GitHub Actions test workflow.
-
-### Changed
-
-- **`technology`, `protocol` and `git.type` accept any value by default.** In 0.3.0 they were closed
-  lists (`git.type` only `gitlab`). To keep the old validation, add the lists to your config:
-
-  ```toml
-  [vocabulary]
-  technologies = ["trino", "minio", "hive-metastore", "opa", "oracle", "postgresql", "mysql", "redis",
-                  "airflow", "celery", "dbt", "iceberg", "gitlab", "keycloak", "ssrs", "rest-api",
-                  "openai-api", "otel-collector"]
-  protocols = ["http", "https", "tcp", "grpc", "ssh"]
-  git_providers = ["gitlab"]
-  ```
-- An E002 for a value outside the vocabulary now reads `technology 'x' is not one of: ...`.
-- `generate_diagram(docs_dir=, subdir=, filename=)` default to `None`, which means "from the settings".
-  The defaults are unchanged (`docs/catalog/dependencies.md`).
-- Default `skip_dirs` no longer has `dbt_packages`; it gains `venv`, `.tox`, `dist` and `build`.
-  Skipped names are now matched only **below** the searched folder, so a checkout under a folder
-  called `build` or `target` is no longer hidden.
-- With a nested `catalog_dir`, the repository root of an explicit catalog file comes from the depth
-  of `catalog_dir` (it was always two levels up).
-- Docs and docstrings are in English.
-
-### Removed
-
-- The modules `catalog_parser.api` and `catalog_parser.lint`, the enums `Category`, `Criticality`,
-  `Protocol` and `Technology`, and the dicts `kinds.FILE_LINTERS`/`CROSS_LINTERS`. The public
-  functions (`lint_file`, `lint_cross`, `check_repo`, `generate_diagram`, `render_mermaid`,
-  `parse_dependencies`, `testing.assert_catalog_valid`) keep their behaviour and are imported from
-  `catalog_parser`.
-
-With the default settings, the lint findings and the diagrams of existing catalogs are byte-for-byte
-the same as in 0.3.0.
-
-### Installation
-
-```bash
-uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.4.0"
-```
-
-## [0.3.0] - 2026-10-28
-
-O diagrama passa a viver em uma subpasta própria de `docs/`, com um nome que espelha o catálogo.
-
-### Alterado
-
-- **Mudança de caminho (incompatível com a 0.2.0):** o diagrama é gravado em `docs/catalog/dependencies.md`.
-  Na 0.2.0 era `docs/catalog-dependencies.md`, solto em `docs/`: o nome agora espelha `catalog/dependencies.yml` e fica dentro de `docs/catalog/`. A subpasta é criada
-  quando `docs/` existe; sem `docs/` continua só o aviso `W301`. Novo `--subdir` (parâmetro `subdir` em
-  `generate_diagram`); o padrão de `--filename` passa de `catalog-dependencies.md` para `dependencies.md`.
-  Quem já gerou o arquivo com a 0.2.0 deve apagar o antigo.
-
-### Instalação
-
-```bash
-uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.3.0"
-```
-
-## [0.2.0] - 2026-10-28
-
-Diagrama Mermaid dos relacionamentos entre CIs e componentes.
-
-### Adicionado
-
-- **Comando `catalog-diagram [ROOT]`** e `catalog_parser.generate_diagram(root, peers=None, docs_dir="docs", filename="catalog-dependencies.md")`:
-  geram `docs/catalog-dependencies.md` com um diagrama Mermaid (`flowchart LR`) do repositório atual — o CI e seus
-  componentes em um quadro, os componentes dos CIs vizinhos que ele consome ou serve, e os sistemas externos.
-  `A --> B` significa "A depende de B"; o rótulo da aresta é o protocolo/porta de quem fornece (`via X` marca acesso
-  indireto); a cor do nó é a criticidade e componentes `data` são cilindros.
-- **Pasta `docs/` ausente não falha:** emite o aviso `W301` (stderr, código de saída `0`) e não escreve nada; a pasta
-  não é criada. Catálogo ilegível ou com esquema inválido não pode ser desenhado: erros no stderr e código de saída `1`.
-- `catalog_parser.render_mermaid(catalog, peers)` devolve só o texto do diagrama.
-- Opções do `catalog-diagram`: `--peers PATH` (repetível, ou `$CATALOG_PEERS`) para rotular os componentes que outros
-  CIs fornecem; `--docs-dir`, `--filename` e `--stdout` (imprime em vez de gravar, sem exigir `docs/`).
-- A saída é determinística (sem data/hora): gerar de novo sem mudar o catálogo não produz diff.
-
-### Alterado
-
-- Internos: `catalog_parser.api` passa a expor `catalog_file`, `repo_root` e `load_peers`, compartilhados com o diagrama.
-  `check_repo` mantém o mesmo comportamento.
-
-### Instalação
-
-```bash
-uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.2.0"
-```
-
-## [0.1.0] - 2026-10-28
-
-Primeira versão: parser e linter para `catalog/dependencies.yml`.
-
-### Adicionado
-
-- **Modelo e parser** (pydantic v2): CI, componentes (`category`, `technology`, `protocol`, `port`,
-  `criticality`, `description`) e dependências `upstream`/`downstream` identificadas por `ci` + `component`
-  da outra ponta e `local_component` deste CI. Sistemas externos levam as características inline.
-  Todo achado traz a linha do arquivo.
-- **Regras por arquivo:** `E001`–`E002` (YAML e esquema), `E101`–`E110` e `E112` (componentes, referências,
-  duplicidades, `git.path`), `W201`–`W202` (porta sem protocolo, componente de dados com protocolo/porta).
-- **Regras entre arquivos:** `X001` (`ci` duplicado), `X002` (componente inexistente no CI referenciado),
-  `X003` (vínculo sem espelho; o campo `blame` indica o CI que precisa acrescentar a entrada) e
-  `W203` (vínculo não conferido porque o catálogo do outro CI não foi carregado).
-- **API para repositórios consumidores:** `catalog_parser.check_repo(root, peers=None)` e o helper de pytest
-  `catalog_parser.testing.assert_catalog_valid(root, peers=None, strict=False)`. Os `peers` (ou a variável
-  `CATALOG_PEERS`) servem de contexto: problemas próprios deles não são reportados, mas um peer que aponta
-  para este CI sem espelho aqui é.
-- **CLI `catalog-lint`:** aceita arquivos ou pastas (procura `catalog/dependencies.yml`), `--format text|json`,
-  `--no-cross` e `--strict`. Código de saída `0` sem erros, `1` com erros (ou avisos em `--strict`), `2` uso incorreto.
-- **Registro de tipos de catálogo** (`kinds.py`): novos arquivos de `catalog/` entram sem mudar descoberta nem CLI.
-- Licença MIT.
-
-### Limitações conhecidas
-
-- Só `dependencies.yml` tem esquema; outros arquivos de `catalog/` passados explicitamente geram `W001`.
-- A CLI reporta os problemas de **todos** os arquivos recebidos; o filtro por repositório (`peers`) existe
-  apenas na API Python e no helper de pytest.
-- `X002`/`X003` só valem entre catálogos carregados na mesma execução.
-
-### Instalação
-
-```bash
-uv add --dev "catalog-parser @ git+https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser@v0.1.0"
-```
-
-[Unreleased]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/gabrielfmcoelho/Bridge---Catalog-Parser/releases/tag/v0.1.0
