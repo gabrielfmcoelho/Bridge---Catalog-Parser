@@ -10,7 +10,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from ..config import Vocabulary
+from ..config import Settings, Vocabulary
 from ..issues import RuleInfo
 from ..parser import Parsed
 
@@ -36,9 +36,15 @@ class FileRule(Rule):
     @abstractmethod
     def check(self, catalog: BaseModel, vocabulary: Vocabulary) -> Iterator[Finding]: ...
 
+    def check_with_settings(self, catalog: BaseModel, settings: Settings) -> Iterator[Finding]:
+        return self.check(catalog, settings.vocabulary)
+
 
 class CrossRule(Rule):
     """Looks at every loaded catalog of one kind at once; findings say which file they belong to."""
 
     @abstractmethod
     def check(self, files: Sequence[Parsed], vocabulary: Vocabulary) -> Iterator[tuple[Parsed, Finding]]: ...
+
+    def check_with_settings(self, files: Sequence[Parsed], settings: Settings) -> Iterator[tuple[Parsed, Finding]]:
+        return self.check(files, settings.vocabulary)

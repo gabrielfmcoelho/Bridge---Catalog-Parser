@@ -12,7 +12,10 @@ from .issues import ERROR, WARNING
 from .kinds import KindRegistry, default_registry
 from .linter import UNKNOWN_KIND, Linter
 from .parser import SCHEMA, UNREADABLE
+from .plugins import load_plugins
+from .remote import RemoteError
 from .reporters import REPORTERS
+from .schema_export import dump_schema
 
 CORE_RULES = (UNREADABLE, SCHEMA, UNKNOWN_KIND, NO_DOCS)
 
@@ -29,10 +32,13 @@ def _settings(config: str | None, start: Path) -> Settings:
 
 
 def _add_config(ap: argparse.ArgumentParser) -> None:
-    ap.add_argument("--config", metavar="FILE|URL",
-                    help="config file (.catalog-parser.toml or pyproject.toml) or URL, e.g. a GitLab file page "
-                         "(token in $CATALOG_PARSER_TOKEN); default: $CATALOG_PARSER_CONFIG, else the nearest one found. "
-                         "CATALOG_PARSER_* variables may also come from a .env file")
+    ap.add_argument(
+        "--config",
+        metavar="FILE|URL",
+        help="config file (.catalog-parser.toml or pyproject.toml) or URL, e.g. a GitLab/GitHub file page "
+             "(token in $CATALOG_PARSER_TOKEN); default: $CATALOG_PARSER_CONFIG, else the nearest one found. "
+             "CATALOG_PARSER_* variables may also come from a .env file",
+    )
 
 
 def list_rules(registry: KindRegistry) -> None:
@@ -41,30 +47,72 @@ def list_rules(registry: KindRegistry) -> None:
 
 
 def main(argv: list[str] | None = None, registry: KindRegistry | None = None) -> int:
+    custom_registry = registry is not None
     registry = registry or default_registry()
     ap = argparse.ArgumentParser(prog="catalog-lint", description=__doc__)
-    ap.add_argument("paths", nargs="*", type=Path, default=[Path(".")],
-                    help="files, or directories searched for <catalog_dir>/<kind> (default: .)")
+    ap.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        default=[Path(".")],
+        help="files, or directories searched for <catalog_dir>/<kind> (default: .)",
+    )
     ap.add_argument("--format", choices=tuple(REPORTERS), default="text")
     ap.add_argument("--no-cross", action="store_true", help="skip the cross-file rules (X###)")
     ap.add_argument("--strict", action="store_true", help="treat warnings as errors")
-    ap.add_argument("--select", action="append", metavar="CODES",
-                    help="only these codes or prefixes, comma-separated (replaces the configured selection)")
-    ap.add_argument("--ignore", action="append", metavar="CODES",
-                    help="skip these codes or prefixes, comma-separated (added to the configured ones)")
+    ap.add_argument(
+        "--select",
+        action="append",
+        metavar="CODES",
+        help="only these codes or prefixes, comma-separated (replaces the configured selection)",
+    )
+    ap.add_argument(
+        "--ignore",
+        action="append",
+        metavar="CODES",
+        help="skip these codes or prefixes, comma-separated (added to the configured ones)",
+    )
     ap.add_argument("--list-rules", action="store_true", help="print every finding code and exit")
+    ap.add_argument(
+        "--dump-schema",
+        choices=("catalog", "config"),
+        metavar="KIND",
+        help="print JSON Schema for 'catalog' (dependencies.yml, using active config) or 'config' (.catalog-parser.toml)",
+    )
     _add_config(ap)
     args = ap.parse_args(argv)
 
+    if args.dump_schema == "config":
+        print(dump_schema("config"))
+        return 0
+
+    if args.dump_schema == "catalog":
+        try:
+            settings = _settings(args.config, Path.cwd())
+        except ConfigError as e:
+            print(f"catalog-lint: {e}", file=sys.stderr)
+            return 2
+        print(dump_schema("catalog", settings))
+        return 0
+
     if args.list_rules:
+        if args.config:
+            try:
+                settings = _settings(args.config, Path.cwd())
+                load_plugins(registry, settings.rules.plugins, include_entry_points=not custom_registry)
+            except ConfigError as e:
+                print(f"catalog-lint: {e}", file=sys.stderr)
+                return 2
         list_rules(registry)
         return 0
+
     missing = [p for p in args.paths if not p.exists()]
     if missing:
         print(f"catalog-lint: no such path: {', '.join(map(str, missing))}", file=sys.stderr)
         return 2
     try:
         settings = _settings(args.config, Path.cwd()).with_rules(_codes(args.select), _codes(args.ignore) or frozenset())
+        load_plugins(registry, settings.rules.plugins, include_entry_points=not custom_registry)
     except ConfigError as e:
         print(f"catalog-lint: {e}", file=sys.stderr)
         return 2
@@ -75,13 +123,20 @@ def main(argv: list[str] | None = None, registry: KindRegistry | None = None) ->
     return 1 if any(i.severity in failing for i in issues) else 0
 
 
-def diagram_main(argv: list[str] | None = None) -> int:
+def diagram_main(argv: list[str] | None = None, registry: KindRegistry | None = None) -> int:
     """catalog-diagram [ROOT] — write the Mermaid dependency map to <ROOT>/<docs_dir>/<subdir>/."""
+    custom_registry = registry is not None
+    registry = registry or default_registry()
     ap = argparse.ArgumentParser(prog="catalog-diagram", description=diagram_main.__doc__)
     ap.add_argument("root", nargs="?", type=Path, default=Path("."), help="repository folder (default: .)")
-    ap.add_argument("--peers", action="append", type=Path, default=None, metavar="PATH",
-                    help="repository or catalog of another CI, to label the components it provides; "
-                         "repeatable (default: the env var named by layout.peers_env, $CATALOG_PEERS)")
+    ap.add_argument(
+        "--peers",
+        action="append",
+        default=None,
+        metavar="PATH|URL",
+        help="repository, catalog file, or remote URL of another CI, to label the components it provides; "
+             "repeatable (default: layout.peers_env or layout.peers)",
+    )
     ap.add_argument("--docs-dir", help="folder under ROOT (default: diagram.docs_dir, docs)")
     ap.add_argument("--subdir", help="folder under the docs folder (default: diagram.subdir, catalog)")
     ap.add_argument("--filename", help="file name (default: diagram.filename, dependencies.md)")
@@ -94,11 +149,13 @@ def diagram_main(argv: list[str] | None = None) -> int:
         return 2
     try:
         settings = _settings(args.config, args.root).with_diagram(
-            docs_dir=args.docs_dir, subdir=args.subdir, filename=args.filename)
-    except ConfigError as e:
+            docs_dir=args.docs_dir, subdir=args.subdir, filename=args.filename
+        )
+        load_plugins(registry, settings.rules.plugins, include_entry_points=not custom_registry)
+        result = DiagramGenerator(Linter(settings, registry)).generate(args.root, args.peers, write=not args.stdout)
+    except (ConfigError, RemoteError) as e:
         print(f"catalog-diagram: {e}", file=sys.stderr)
         return 2
-    result = DiagramGenerator(Linter(settings)).generate(args.root, args.peers, write=not args.stdout)
     for issue in result.issues:
         print(issue.format(), file=sys.stderr)
     if result.markdown is None:  # catalog unreadable or schema-invalid: nothing to draw

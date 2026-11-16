@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import yaml
@@ -22,6 +23,8 @@ from catalog_parser import (
     Vocabulary,
     check_repo,
     default_registry,
+    export_catalog_schema,
+    export_config_schema,
     lint_file,
 )
 from catalog_parser.cli import main
@@ -102,6 +105,49 @@ def test_register_a_new_catalog_kind(tmp_path):
     assert main(["--list-rules"], registry=registry) == 0
 
 
+def test_plugin_loading_via_config_and_cli(tmp_path, monkeypatch, capsys):
+    plugin_file = tmp_path / "my_org_plugin.py"
+    plugin_file.write_text(
+        "from catalog_parser import FileRule, Finding\n"
+        "from catalog_parser.issues import WARNING, RuleInfo\n"
+        "class RequireMultipleOwners(FileRule):\n"
+        "    info = RuleInfo('C901', WARNING, 'require at least two owners')\n"
+        "    def check(self, catalog, vocabulary):\n"
+        "        if len(catalog.owners) < 2:\n"
+        "            yield Finding(('owners',), 'add a backup owner')\n"
+        "rule = RequireMultipleOwners()\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    cfg = tmp_path / ".catalog-parser.toml"
+    cfg.write_text('[rules]\nplugins = ["my_org_plugin:rule"]\n')
+
+    assert main(["--config", str(cfg), "--list-rules"]) == 0
+    assert "C901  warning  require at least two owners" in capsys.readouterr().out
+
+    path = write(tmp_path, base("svc-a"))
+    assert main(["--config", str(cfg), "--strict", str(path)]) == 1
+    assert "C901" in capsys.readouterr().out
+
+
+def test_dump_schema_for_catalog_and_config(tmp_path, capsys):
+    cfg = tmp_path / ".catalog-parser.toml"
+    cfg.write_text(
+        '[vocabulary]\ntechnologies = ["postgresql", "rest-api"]\n'
+        '[schema]\nrequired_fields = ["owners"]\nrequired_metadata = ["domain"]\n'
+    )
+    assert main(["--config", str(cfg), "--dump-schema", "catalog"]) == 0
+    cat_schema = json.loads(capsys.readouterr().out)
+    assert cat_schema["title"] == "DependencyCatalog"
+    assert cat_schema["$defs"]["Component"]["properties"]["technology"]["enum"] == ["postgresql", "rest-api"]
+    assert "entity" not in cat_schema["required"]
+    assert "metadata" in cat_schema["required"]
+
+    assert main(["--dump-schema", "config"]) == 0
+    cfg_schema = json.loads(capsys.readouterr().out)
+    assert cfg_schema["title"] == "CatalogParserConfig"
+    assert "vocabulary" in cfg_schema["properties"] and "schema" in cfg_schema["properties"]
+
+
 def test_cli_list_rules(capsys):
     assert main(["--list-rules"]) == 0
     out = capsys.readouterr().out
@@ -127,11 +173,15 @@ def test_custom_reporter(monkeypatch, tmp_path, pair, capsys):
 
 def test_diagram_direction_styles_and_data_categories(tmp_path):
     d = base("svc-a")
-    d["components"] = [component("api", criticality="tier-1"),
-                       component("lake", category="storage", technology="s3", criticality="tier-2",
-                                 protocol=None, port=None)]
-    vocabulary = Vocabulary(categories=frozenset({"application", "storage"}), data_categories=frozenset({"storage"}),
-                            criticalities=("tier-1", "tier-2"))
+    d["components"] = [
+        component("api", criticality="tier-1"),
+        component("lake", category="storage", technology="s3", criticality="tier-2", protocol=None, port=None),
+    ]
+    vocabulary = Vocabulary(
+        categories=frozenset({"application", "storage"}),
+        data_categories=frozenset({"storage"}),
+        criticalities=("tier-1", "tier-2"),
+    )
     settings = Settings(vocabulary=vocabulary)
     catalog = lint_file(write(tmp_path, d), settings).catalog
     text = MermaidRenderer(DiagramSettings(direction="TB", styles={"tier-1": "fill:#f00"}), vocabulary).render(catalog)
