@@ -177,41 +177,62 @@ Você pode parametrizar vocabulários fechados, obrigatoriedade de campos, sever
 
 ### 5.1. Usando um Repositório Remoto de Configurações (Governança Centralizada)
 
-Em vez de duplicar regras em cada repositório, sua organização pode manter um repositório central (no GitHub, GitLab ou Bitbucket) e os projetos consumidores herdam dele:
+Para não haver confusão sobre onde cada arquivo fica, considere que existem **3 repositórios distintos**:
+
+| Repositório | Papel | O que fica nele? |
+|---|---|---|
+| **1. `catalog-parser`** *(a ferramenta)* | Biblioteca/CLI open source instalada via `uv` ou `pip` | Apenas o código do parser (você **não** edita nada nele). |
+| **2. Repositório Remoto de Governança** *(ex.: `sua-org/catalog-governance`)* | Repositório central da sua empresa/organização | O arquivo `.catalog-parser.toml` mestre com o vocabulário e regras oficiais da organização. |
+| **3. Repositório Avaliado pelo Linter** *(ex.: `sua-org/shop-api`)* | O sistema/serviço que você quer validar | O catálogo `catalog/dependencies.yml` + o `.catalog-parser.toml` (ou `.env`) apontando para o repositório de governança. |
+
+```mermaid
+flowchart TB
+  subgraph GovRepo["2. Repositório Remoto de Governança (sua-org/catalog-governance)"]
+    MasterCfg[".catalog-parser.toml (regras e vocabulário da empresa)"]
+  end
+
+  subgraph TargetRepo["3. Repositório Avaliado pelo Linter (sua-org/shop-api)"]
+    LocalCatalog["catalog/dependencies.yml"]
+    LocalToml[".catalog-parser.toml (extends = URL remota)"]
+    LocalEnv[".env (CATALOG_PARSER_TOKEN)"]
+  end
+
+  LocalToml -->|"herda via HTTPS"| MasterCfg
+```
 
 #### Opção 1: Herança via `extends` no `.catalog-parser.toml` (Recomendado)
-Crie um `.catalog-parser.toml` na raiz do seu repositório herdando da URL remota:
+Crie um `.catalog-parser.toml` na raiz do **repositório que você quer avaliar com o linter** (ex.: `shop-api/.catalog-parser.toml`), herdando da URL do **repositório remoto de governança**:
 
 ```toml
-# .catalog-parser.toml
+# <repositório-avaliado>/.catalog-parser.toml
 extends = "https://github.com/sua-org/catalog-governance/blob/v1/.catalog-parser.toml"
 
-# Você pode customizar seções não bloqueadas (como o diretório de documentação):
+# Você pode customizar seções não bloqueadas para este repositório específico:
 [diagram]
 docs_dir = "docs"
 direction = "LR"
 ```
 
-Se o repositório remoto de configurações for **privado**, defina apenas o token no seu arquivo `.env` local (que fica no `.gitignore`) ou variável de ambiente:
+Se o repositório remoto de governança for **privado**, defina o token no arquivo `.env` na raiz do **repositório avaliado** (ou como variável de ambiente no seu terminal):
 
 ```bash
-# .env
+# <repositório-avaliado>/.env
 CATALOG_PARSER_TOKEN=ghp_seu_token_aqui
 # Opcional: cache local em segundos para não baixar a configuração a cada execução
 CATALOG_PARSER_CACHE_TTL=300
 ```
 
 #### Opção 2: Apontar diretamente via `.env` ou `--config`
-Sem criar `.catalog-parser.toml` no repositório, defina a URL no `.env`:
+Se não quiser criar um `.catalog-parser.toml` no **repositório avaliado**, você pode definir a URL diretamente no `.env` dele:
 
 ```bash
-# .env
+# <repositório-avaliado>/.env
 CATALOG_PARSER_CONFIG=https://gitlab.example.org/platform/governance/-/blob/main/.catalog-parser.toml
 CATALOG_PARSER_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
 ```
-Ou passe explicitamente na linha de comando:
+Ou passar a URL explicitamente ao rodar o comando sobre o repositório avaliado:
 ```bash
-catalog-lint --config https://github.com/sua-org/governance/blob/main/.catalog-parser.toml .
+catalog-lint --config https://github.com/sua-org/governance/blob/main/.catalog-parser.toml /caminho/do/repositorio-avaliado
 ```
 
 ### 5.2. Exemplo completo de `.catalog-parser.toml` (para o Repositório de Governança)
